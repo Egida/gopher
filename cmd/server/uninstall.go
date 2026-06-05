@@ -20,6 +20,7 @@ func runUninstall(args []string) error {
 	fs.StringVar(&cfg.dataDir, "data-dir", defaultDataDir, "data directory")
 	fs.StringVar(&cfg.serviceName, "service-name", defaultServiceName, "systemd service name")
 	skipPrompts := fs.Bool("skip-prompts", false, "skip all confirmation prompts and remove everything")
+	keepData := fs.Bool("keep-data", false, "preserve the data directory (database, certs, state); overrides --skip-prompts")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -116,11 +117,31 @@ func runUninstall(args []string) error {
 	}
 	_ = os.Remove(cfg.installDir)
 
-	if err := ensureSafeRemovalPath(cfg.dataDir); err != nil {
-		return fmt.Errorf("refusing to remove data dir: %w", err)
+	// Data dir (database, certs, state) is preserved by default on a bare
+	// uninstall, so uninstall-to-reinstall doesn't silently wipe your setup.
+	// --skip-prompts removes it; --keep-data always preserves it.
+	dataSummary := fmt.Sprintf("Data kept: %s", cfg.dataDir)
+	removeData := false
+	switch {
+	case *keepData:
+		removeData = false
+	case *skipPrompts:
+		removeData = true
+	default:
+		var err error
+		removeData, err = promptYesNo(fmt.Sprintf("Remove Gopher data (database, certs, state) at %q? This is irreversible. [y/N]: ", cfg.dataDir))
+		if err != nil {
+			return fmt.Errorf("failed reading data removal confirmation: %w", err)
+		}
 	}
-	if err := os.RemoveAll(cfg.dataDir); err != nil {
-		return fmt.Errorf("failed to remove data dir: %w", err)
+	if removeData {
+		if err := ensureSafeRemovalPath(cfg.dataDir); err != nil {
+			return fmt.Errorf("refusing to remove data dir: %w", err)
+		}
+		if err := os.RemoveAll(cfg.dataDir); err != nil {
+			return fmt.Errorf("failed to remove data dir: %w", err)
+		}
+		dataSummary = fmt.Sprintf("Data removed: %s", cfg.dataDir)
 	}
 
 	userSummary := fmt.Sprintf("System user not found: %s", cfg.user)
@@ -147,7 +168,7 @@ func runUninstall(args []string) error {
 	fmt.Printf("Service unit removed: %s\n", servicePath)
 	fmt.Printf("Sudoers removed: %s\n", sudoersPath)
 	fmt.Printf("Binary removed: %s\n", targetBinary)
-	fmt.Printf("Data removed: %s\n", cfg.dataDir)
+	fmt.Println(dataSummary)
 	fmt.Println(caddySummary)
 	fmt.Println(ratholeSummary)
 	fmt.Println(userSummary)

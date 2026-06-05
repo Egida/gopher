@@ -35,6 +35,8 @@ vault.yourdomain.com  → Bitwarden on Raspberry Pi (behind NAT)
 
 ## Installation
 
+> **📺 Prefer to watch?** [**12-minute video install guide**](https://www.youtube.com/watch?v=KYpr61Ak9FE) — a full walkthrough from VPS to first tunnel.
+
 Gopher ships as a single self-contained binary for Linux. No runtime dependencies — Caddy and rathole are downloaded automatically during setup.
 
 ### Requirements
@@ -73,6 +75,18 @@ sudo mv gopher-linux-amd64 /usr/local/bin/gopher
 ```
 
 Verify your download against checksums on the [releases page](https://github.com/smalex-z/gopher/releases).
+
+Or
+
+**Build from source** (for development, auditing, or unsupported architectures):
+```bash
+git clone https://github.com/smalex-z/gopher.git
+cd gopher
+./scripts/build.sh          # builds the embedded frontend + agent, then the binary
+sudo ./gopher install
+```
+Requires Go and Node 18+ (the build fetches the pinned Go toolchain automatically). The result is a
+single self-contained `./gopher` binary, identical to the release artifact.
 
 ### Run
 
@@ -148,7 +162,9 @@ sudo gopher uninstall
 This stops and removes the Gopher service, then prompts for the rest: it can either **strip just
 Gopher's managed entries** from Caddy and rathole (leaving your own config, with a `.gopher-backup` of
 the originals) or **remove Caddy and rathole entirely**, and it cleans up the sudoers entry and the
-`gopher-jump` user it created. Add `--skip-prompts` to remove everything non-interactively.
+`gopher-jump` user it created. **Your data directory (database, certs, state) is preserved by default**
+— you're prompted before it's removed, so an uninstall-to-reinstall keeps your setup. Use `--keep-data`
+to always preserve it, or `--skip-prompts` to remove everything (data included) non-interactively.
 
 > Uninstall the origins **first** (while the edge is still up) so each box gets cleanly torn down and
 > drops out of the dashboard. If you remove the edge first, run `gopher-uninstall` on each origin
