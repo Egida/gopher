@@ -22,6 +22,7 @@ vault.yourdomain.com  → Bitwarden on Raspberry Pi (behind NAT)
 - [Uninstall](#uninstall)
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
+- [Security and Edge Filtering](#security-and-edge-filtering)
 - [Use Cases](#use-cases)
 - [Comparison](#comparison)
 - [Firewall Setup](#firewall-setup)
@@ -243,6 +244,37 @@ gopher/
 **Frontend:** React 18 + TypeScript, Vite, Tailwind CSS — embedded in the binary via `//go:embed`
 
 **Infrastructure (managed by Gopher):** [Caddy 2](https://caddyserver.com/) for HTTPS + routing, [rathole](https://github.com/rathole-org/rathole) for tunneling
+
+---
+
+## Security and Edge Filtering
+
+Because Gopher terminates TLS at the edge (see [Encryption model](#encryption-model)), it can
+inspect and filter requests **before they ever reach your origin** — the thing a plain tunnel can't
+do. This is what sets it apart from a raw ngrok/Cloudflare-Tunnel pipe.
+
+**Bot detection (per-tunnel, opt-in).** Turn it on for any HTTP tunnel and Gopher puts a JavaScript
+**proof-of-work challenge** in front of it: a browser has to solve a small SHA-256 puzzle (~1–3s of
+work) before it's let through, then carries an **HMAC-signed session cookie** (`gopher_bot_pass`, 24h)
+so real visitors aren't re-challenged. Non-browser / API clients get a JSON response instead of the
+HTML challenge. It filters the scrapers and port-scanners that crawl for exposed services — at the
+edge, post-TLS-termination, before the request hits your origin. Cloudflare-style "are you human?"
+gating, self-hosted.
+
+**Dashboard 2FA (TOTP).** Protect the admin dashboard with time-based one-time passwords — QR
+enrollment, multiple devices, and one-time backup codes.
+
+**fail2ban integration.** Gopher writes and manages a fail2ban jail that bans IPs after repeated
+failed dashboard logins (configurable retry / find-time / ban-time, plus an allowlist) and surfaces
+jail status in the dashboard.
+
+**DNS preflight.** The setup wizard runs a battery of DNS checks before you go live — proving the
+wildcard record actually resolves to *your* VPS (not a registrar parking page), checking propagation
+across public resolvers, and flagging CAA records that would block certificate issuance — so DNS
+problems surface during setup instead of after.
+
+**Firewall management.** Gopher can manage iptables for you — a dedicated chain with tunnel ports
+opened and closed automatically as tunnels come and go (see [Firewall Setup](#firewall-setup)).
 
 ---
 
