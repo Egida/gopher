@@ -19,6 +19,7 @@ vault.yourdomain.com  → Bitwarden on Raspberry Pi (behind NAT)
 
 - [Installation](#installation)
 - [Setup Workflow](#setup-workflow)
+- [Uninstall](#uninstall)
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
 - [Use Cases](#use-cases)
@@ -37,20 +38,26 @@ Gopher ships as a single self-contained binary for Linux. No runtime dependencie
 
 ### Requirements
 
-- Linux VPS (Ubuntu 22.04+ or RHEL 8+ recommended), x86_64 or arm64
-- A domain with a wildcard DNS A record pointing at your VPS: `*.yourdomain.com → <VPS IP>`
-- Ports 22, 80, 443, and 2333 reachable on the VPS
+**Edge — the VPS Gopher runs on:**
+- Linux (Ubuntu 22.04+ or RHEL 8+ recommended), x86_64 or arm64
+- A domain with a wildcard DNS A record pointing at the VPS: `*.yourdomain.com → <VPS IP>`
+- Ports 22, 80, 443, and 2333 reachable
+- `sudo` (used to install Caddy/rathole and manage the firewall)
+
+**Origin — each machine you expose:**
+- Linux, with outbound network access to the VPS (no inbound ports or port-forwarding needed)
+- `sudo` — required by the bootstrap/agent install. Minimal images (Proxmox, some containers) often
+  ship without it: `apt install sudo`, or run the bootstrap command as `root` with the `sudo` removed.
 
 ### Download
 
-**Quick install (recommended):**
+**Quick install (latest stable):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/smalex-z/gopher/main/scripts/install.sh | bash
 ```
 
-Or for pre-releases (may be buggy):
+**Pre-releases** (newer features, may be unstable — e.g. the v0.2.x line):
 ```bash
-# Include pre-releases (recommended for now — no stable release yet):
 curl -fsSL https://raw.githubusercontent.com/smalex-z/gopher/main/scripts/install.sh | bash -s -- --prerelease
 ```
 
@@ -107,6 +114,44 @@ After the wizard, you're at the main dashboard:
 - `https://photos.yourdomain.com` is live with automatic TLS in seconds
 
 Gopher supports **HTTP, raw TCP, and UDP** tunnels.
+
+---
+
+## Uninstall
+
+There are two halves to remove: each **origin** (the machines you exposed) and the **edge** (the VPS).
+
+### Origin machines
+
+**From the dashboard (recommended):** delete the machine on the **Machines** tab. Gopher runs the
+uninstall on the box for you — stopping and removing the `gopher-agent` and `rathole-client` services,
+their configs, and the dedicated `gopher` system user.
+
+**Directly on the machine** (e.g. if it's offline or you're removing it by hand):
+```bash
+sudo /usr/local/bin/gopher-uninstall
+```
+This notifies the dashboard (so the machine list stays in sync), then stops and removes `gopher-agent`
+and `rathole-client` (services, binaries, `/etc/rathole`, `/etc/gopher-agent`) and the `gopher` user.
+To remove a single tunnel or machine entry instead of everything:
+```bash
+sudo /usr/local/bin/gopher-uninstall --remove-tunnel  <TUNNEL_ID>
+sudo /usr/local/bin/gopher-uninstall --remove-machine <MACHINE_ID>
+```
+
+### Edge (the VPS)
+
+```bash
+sudo gopher uninstall
+```
+This stops and removes the Gopher service, then prompts for the rest: it can either **strip just
+Gopher's managed entries** from Caddy and rathole (leaving your own config, with a `.gopher-backup` of
+the originals) or **remove Caddy and rathole entirely**, and it cleans up the sudoers entry and the
+`gopher-jump` user it created. Add `--skip-prompts` to remove everything non-interactively.
+
+> Uninstall the origins **first** (while the edge is still up) so each box gets cleanly torn down and
+> drops out of the dashboard. If you remove the edge first, run `gopher-uninstall` on each origin
+> directly to clean them up.
 
 ---
 
