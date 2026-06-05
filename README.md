@@ -134,41 +134,45 @@ Gopher supports **HTTP, raw TCP, and UDP** tunnels.
 
 ## Uninstall
 
-There are two halves to remove: each **origin** (the machines you exposed) and the **edge** (the VPS).
-
-### Origin machines
-
-**From the dashboard (recommended):** delete the machine on the **Machines** tab. Gopher runs the
-uninstall on the box for you — stopping and removing the `gopher-agent` and `rathole-client` services,
-their configs, and the dedicated `gopher` system user.
-
-**Directly on the machine** (e.g. if it's offline or you're removing it by hand):
-```bash
-sudo /usr/local/bin/gopher-uninstall
-```
-This notifies the dashboard (so the machine list stays in sync), then stops and removes `gopher-agent`
-and `rathole-client` (services, binaries, `/etc/rathole`, `/etc/gopher-agent`) and the `gopher` user.
-To remove a single tunnel or machine entry instead of everything:
-```bash
-sudo /usr/local/bin/gopher-uninstall --remove-tunnel  <TUNNEL_ID>
-sudo /usr/local/bin/gopher-uninstall --remove-machine <MACHINE_ID>
-```
-
-### Edge (the VPS)
+Run this on the **edge** (the VPS where you ran `gopher`):
 
 ```bash
 sudo gopher uninstall
 ```
-This stops and removes the Gopher service, then prompts for the rest: it can either **strip just
-Gopher's managed entries** from Caddy and rathole (leaving your own config, with a `.gopher-backup` of
-the originals) or **remove Caddy and rathole entirely**, and it cleans up the sudoers entry and the
-`gopher-jump` user it created. **Your data directory (database, certs, state) is preserved by default**
-— you're prompted before it's removed, so an uninstall-to-reinstall keeps your setup. Use `--keep-data`
-to always preserve it, or `--skip-prompts` to remove everything (data included) non-interactively.
 
-> Uninstall the origins **first** (while the edge is still up) so each box gets cleanly torn down and
-> drops out of the dashboard. If you remove the edge first, run `gopher-uninstall` on each origin
-> directly to clean them up.
+It tears down the whole deployment, in order:
+
+1. **Connected origins first** — while the tunnels are still up, it uninstalls the `gopher-agent` and
+   tunnel client on every reachable machine (the edge is your path to NAT'd boxes, so this happens
+   before the edge goes away). Machines that are **offline** can't be reached and are reported as
+   orphans to clean up by hand (below).
+2. **The edge itself** — stops and removes the Gopher service, then prompts to either **strip just
+   Gopher's managed entries** from Caddy and rathole (keeping your own config, with a `.gopher-backup`)
+   or **remove Caddy and rathole entirely**, and removes the sudoers entry and the `gopher-jump` user.
+
+**Your data (database, certs, state) is kept by default** — you're prompted before it's deleted, so an
+uninstall-to-reinstall keeps your setup. Flags:
+
+- `--keep-data` — always preserve the data directory
+- `--keep-origins` — leave the origin machines installed (only remove the edge)
+- `--skip-prompts` — remove everything (data + origins included) non-interactively
+
+> To remove a **single machine** without uninstalling everything, just delete it on the dashboard's
+> **Machines** tab — Gopher tears it down on the box for you.
+
+### Orphaned origins
+
+A machine that was **offline** when you uninstalled the edge keeps its agent + tunnel client installed
+(it just can't reach the now-gone edge). Clean it up directly on the box:
+```bash
+sudo gopher-uninstall                          # full removal
+sudo gopher-uninstall --remove-tunnel  <ID>    # remove just one tunnel
+sudo gopher-uninstall --remove-machine <ID>    # remove just one machine's SSH entry
+```
+Full removal stops and deletes `gopher-agent` and `rathole-client` (services, binaries, `/etc/rathole`,
+`/etc/gopher-agent`) and the `gopher` user.
+
+(The helper lives at `/usr/local/bin/gopher-uninstall` — use the full path if your shell can't find it.)
 
 ---
 

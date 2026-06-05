@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/service"
 )
 
 func runUninstall(args []string) error {
@@ -21,6 +26,7 @@ func runUninstall(args []string) error {
 	fs.StringVar(&cfg.serviceName, "service-name", defaultServiceName, "systemd service name")
 	skipPrompts := fs.Bool("skip-prompts", false, "skip all confirmation prompts and remove everything")
 	keepData := fs.Bool("keep-data", false, "preserve the data directory (database, certs, state); overrides --skip-prompts")
+	keepOrigins := fs.Bool("keep-origins", false, "don't uninstall the connected origin machines (leave their agent/tunnel installed)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -28,6 +34,11 @@ func runUninstall(args []string) error {
 	if os.Geteuid() != 0 {
 		return runWithSudo("uninstall", args)
 	}
+
+	// Tear down reachable origins first, while the rathole tunnels are still up
+	// — so the whole deployment comes down with one command. Origins that are
+	// offline (unreachable) are reported as orphans for a manual gopher-uninstall.
+	maybeTeardownOrigins(filepath.Join(cfg.dataDir, "gopher.db"), *skipPrompts, *keepOrigins)
 
 	fmt.Println("Uninstalling Gopher service...")
 
@@ -173,6 +184,63 @@ func runUninstall(args []string) error {
 	fmt.Println(ratholeSummary)
 	fmt.Println(userSummary)
 	return nil
+}
+
+// maybeTeardownOrigins uninstalls the agent + tunnel client on every reachable
+// origin before the edge itself is removed. It's best-effort: origins that are
+// offline (or otherwise unreachable through the still-up rathole tunnels) are
+// reported as orphans for a manual `gopher-uninstall` on the box. Skipped with
+// --keep-origins; auto-confirmed with --skip-prompts.
+func maybeTeardownOrigins(dbPath string, skipPrompts, keepOrigins bool) {
+	if keepOrigins {
+		return
+	}
+	// Best-effort DB open; if there's no DB (fresh/already-removed) there's
+	// nothing to tear down.
+	if err := db.Initialize(dbPath); err != nil {
+		return
+	}
+	machines, err := db.GetMachines()
+	if err != nil {
+		fmt.Printf("  WARN: could not list machines to tear down: %v\n", err)
+		return
+	}
+	var withAgent []db.Machine
+	for _, m := range machines {
+		if m.AgentRemotePort > 0 { // has an agent back-channel we can reach
+			withAgent = append(withAgent, m)
+		}
+	}
+	if len(withAgent) == 0 {
+		return
+	}
+
+	if !skipPrompts {
+		ok, err := promptYesNo(fmt.Sprintf("Uninstall the %d connected origin machine(s) too? Offline ones will be left orphaned. [y/N]: ", len(withAgent)))
+		if err != nil || !ok {
+			fmt.Printf("  Leaving %d origin machine(s) installed — run `sudo gopher-uninstall` on each to remove them.\n", len(withAgent))
+			return
+		}
+	}
+
+	var reached, orphaned []string
+	for i := range withAgent {
+		m := withAgent[i]
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := service.NewAgentClient(&m).Uninstall(ctx)
+		cancel()
+		if err != nil {
+			orphaned = append(orphaned, m.Name)
+		} else {
+			reached = append(reached, m.Name)
+		}
+	}
+	if len(reached) > 0 {
+		fmt.Printf("  Tore down %d origin(s): %s\n", len(reached), strings.Join(reached, ", "))
+	}
+	if len(orphaned) > 0 {
+		fmt.Printf("  Could NOT reach %d origin(s) (offline?) — run `sudo gopher-uninstall` on each: %s\n", len(orphaned), strings.Join(orphaned, ", "))
+	}
 }
 
 func removeFileIfExists(path string) (bool, error) {
