@@ -225,6 +225,27 @@ function AddKeyModal({ onClose }: AddKeyModalProps) {
   )
 }
 
+// ─── Copy public-key button (per row) ──────────────────────────────────────────
+function CopyPublicKeyButton({ publicKey }: { publicKey: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(publicKey).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+      toast.success('Public key copied')
+    })
+  }
+  return (
+    <button
+      onClick={copy}
+      title="Copy public key"
+      className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+    >
+      {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+    </button>
+  )
+}
+
 // ─── SSH Keys Page ────────────────────────────────────────────────────────────
 export default function SSHKeysPage() {
   const queryClient = useQueryClient()
@@ -338,6 +359,7 @@ export default function SSHKeysPage() {
                   <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">{formatDate(key.created_at)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
+                      <CopyPublicKeyButton publicKey={key.public_key} />
                       <DownloadKeyButton
                         id={key.id}
                         name={key.name}
