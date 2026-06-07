@@ -26,7 +26,7 @@ func newTestRouter(t *testing.T) (http.Handler, *service.AuthService) {
 
 	authSvc := service.NewAuthService()
 	deploySvc := service.NewDeployService()
-	vpsSvc := service.NewVPSService(deploySvc)
+	vpsSvc := service.NewVPSService()
 	machineSvc := service.NewMachineService(deploySvc, nil)
 	tunnelSvc := service.NewTunnelService(nil)
 	localSvc := service.NewLocalSetupService(deploySvc.Hub)

@@ -83,7 +83,7 @@ func runServer(args []string) {
 
 	deploySvc := service.NewDeployService()
 	localSvc := service.NewLocalSetupService(deploySvc.Hub)
-	vpsSvc := service.NewVPSService(deploySvc)
+	vpsSvc := service.NewVPSService()
 	machineSvc := service.NewMachineService(deploySvc, localSvc)
 	tunnelSvc := service.NewTunnelService(localSvc)
 	authSvc := service.NewAuthService()

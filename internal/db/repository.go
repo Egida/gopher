@@ -22,18 +22,6 @@ func GetVPS() (*VPSConfig, error) {
 	return &vps, nil
 }
 
-func CreateVPS(vps *VPSConfig) error {
-	return DB.Create(vps).Error
-}
-
-func UpdateVPS(vps *VPSConfig) error {
-	return DB.Save(vps).Error
-}
-
-func DeleteVPS(id string) error {
-	return DB.Delete(&VPSConfig{}, "id = ?", id).Error
-}
-
 // Machine Repository
 
 func GetMachines() ([]Machine, error) {

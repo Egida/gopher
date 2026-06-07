@@ -168,20 +168,6 @@ func (s *DeployService) logWriter() io.Writer {
 	return &hubWriter{hub: s.Hub}
 }
 
-func (s *DeployService) Bootstrap(vpsConfig *db.VPSConfig) error {
-	w := s.logWriter()
-	client, err := sshpkg.NewClient(vpsConfig.Host, vpsConfig.Port, vpsConfig.Username, vpsConfig.PrivateKey)
-	if err != nil {
-		fmt.Fprintf(w, "ERROR: Failed to connect: %v\n", err)
-		s.Hub.Broadcast("\x00DONE")
-		return err
-	}
-	defer client.Close()
-
-	err = sshpkg.BootstrapVPS(client, w)
-	s.Hub.Broadcast("\x00DONE")
-	return err
-}
 
 func (s *DeployService) DeployClient(machine *db.Machine) error {
 	w := s.logWriter()

@@ -134,11 +134,6 @@ func NewRouter(
 
 			r.Route("/vps", func(r chi.Router) {
 				r.Get("/", vpsH.Get)
-				r.Post("/setup", vpsH.Create)
-				r.Put("/", vpsH.Update)
-				r.Delete("/", vpsH.Delete)
-				r.Post("/bootstrap", vpsH.Bootstrap)
-				r.Get("/status", vpsH.Status)
 			})
 
 			r.Route("/machines", func(r chi.Router) {
