@@ -361,6 +361,30 @@ func (s *LocalSetupService) RemoveServiceTunnelCaddy(tunnel *db.Tunnel) error {
 	return nil
 }
 
+// WriteServiceTunnelCaddy (re)writes the managed conf.d/<id>.caddy block for a
+// tunnel from its current state and reloads Caddy. Mirror of
+// RemoveServiceTunnelCaddy. The caller decides *when* to call it (subdomain set,
+// HTTP, not private); this renders the tunnel as it stands and no-ops when there
+// is no subdomain or no configured domain to route under.
+func (s *LocalSetupService) WriteServiceTunnelCaddy(tunnel *db.Tunnel) error {
+	if tunnel == nil || tunnel.Subdomain == "" {
+		return nil
+	}
+	settings, err := db.GetSettings()
+	if err != nil || settings.Domain == "" {
+		return nil
+	}
+	managedPath := managedTunnelCaddyPath(tunnel.ID)
+	block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, settings.BindIP, tunnel.TLSSkipVerify)
+	if err := writeLocalFile(managedPath, block); err != nil {
+		return fmt.Errorf("write caddy block for %s: %w", tunnel.ID, err)
+	}
+	if err := systemctlReload("caddy"); err != nil {
+		return fmt.Errorf("caddy reload failed: %w", err)
+	}
+	return nil
+}
+
 // RemoveServiceTunnel keeps backwards compatibility with older callers by
 // performing full tunnel cleanup in the canonical order.
 func (s *LocalSetupService) RemoveServiceTunnel(tunnel *db.Tunnel, machine *db.Machine) {

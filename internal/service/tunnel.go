@@ -273,6 +273,13 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 		return nil, err
 	}
 
+	// Capture the original subdomain BEFORE mutating it below. The Caddy
+	// reconcile near the end compares oldSubdomain against the final value to
+	// decide whether to rewrite conf.d/<id>.caddy. Capturing it after the
+	// mutation made that compare a no-op, so subdomain edits updated the DB
+	// (and the UI) but never touched Caddy — it kept serving the old block.
+	oldSubdomain := tunnel.Subdomain
+
 	if req.Subdomain != tunnel.Subdomain {
 		if req.Subdomain != "" && settings.Domain == "" {
 			return nil, &apperrors.ValidationError{Field: "subdomain", Message: "URL routing is disabled; leave subdomain empty"}
@@ -294,7 +301,6 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 	oldBotProtection := tunnel.BotProtectionEnabled
 	oldTLSSkipVerify := tunnel.TLSSkipVerify
 	oldLocalPort := tunnel.LocalPort
-	oldSubdomain := tunnel.Subdomain
 	tunnel.Name = req.Name
 	tunnel.LocalPort = req.LocalPort
 	tunnel.Private = req.Private
@@ -342,22 +348,18 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 	//   "x" → "y"       : overwrite block, reload
 	//   "x" → ""        : remove block (privacy flipped to private), reload
 	if oldSubdomain != tunnel.Subdomain && s.local != nil {
-		settings, sErr := db.GetSettings()
 		switch {
-		case sErr != nil:
-			log.Printf("tunnel update: load settings for caddy: %v", sErr)
 		case tunnel.Subdomain == "":
-			// Subdomain cleared → drop the Caddy file.
+			// Subdomain cleared (or flipped private) → drop the Caddy file.
 			if err := s.local.RemoveServiceTunnelCaddy(tunnel); err != nil {
 				log.Printf("tunnel update: remove caddy block for %s: %v", tunnel.ID, err)
 			}
-		case settings.Domain != "" && tunnel.Transport != "udp" && !tunnel.Private:
-			managedPath := managedTunnelCaddyPath(tunnel.ID)
-			block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, settings.BindIP, tunnel.TLSSkipVerify)
-			if writeErr := writeLocalFile(managedPath, block); writeErr != nil {
-				log.Printf("tunnel update: rewrite caddy block for %s: %v", tunnel.ID, writeErr)
-			} else if reloadErr := systemctlReload("caddy"); reloadErr != nil {
-				log.Printf("tunnel update: caddy reload after subdomain change for %s: %v", tunnel.ID, reloadErr)
+		case tunnel.Transport != "udp" && !tunnel.Private:
+			// Subdomain set/changed → (re)write the block. No-ops if no domain
+			// is configured. The managed file is keyed by tunnel ID, so the
+			// rewrite replaces the old subdomain's block in place.
+			if err := s.local.WriteServiceTunnelCaddy(tunnel); err != nil {
+				log.Printf("tunnel update: rewrite caddy block for %s: %v", tunnel.ID, err)
 			}
 		}
 	}
@@ -365,14 +367,8 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 	// If bot protection or TLS skip verify toggled (and the subdomain branch
 	// above didn't already rewrite), refresh the Caddy block.
 	if oldSubdomain == tunnel.Subdomain && (oldBotProtection != tunnel.BotProtectionEnabled || oldTLSSkipVerify != tunnel.TLSSkipVerify) && tunnel.Subdomain != "" && s.local != nil {
-		if svcSettings, svcErr := db.GetSettings(); svcErr == nil && svcSettings.Domain != "" {
-			managedPath := managedTunnelCaddyPath(tunnel.ID)
-			block := buildTunnelCaddyBlock(tunnel.Subdomain, svcSettings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, svcSettings.BindIP, tunnel.TLSSkipVerify)
-			if writeErr := writeLocalFile(managedPath, block); writeErr != nil {
-				log.Printf("tunnel update: failed to rewrite Caddy block for %s: %v", tunnel.ID, writeErr)
-			} else if reloadErr := systemctlReload("caddy"); reloadErr != nil {
-				log.Printf("tunnel update: caddy reload failed for %s: %v", tunnel.ID, reloadErr)
-			}
+		if err := s.local.WriteServiceTunnelCaddy(tunnel); err != nil {
+			log.Printf("tunnel update: refresh caddy block for %s: %v", tunnel.ID, err)
 		}
 	}
 
