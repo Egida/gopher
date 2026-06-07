@@ -363,7 +363,7 @@ Gopher can manage iptables rules automatically. During the setup wizard, choose 
 - Open the dashboard port (default 4321) — or restrict it to localhost if Caddy is configured
 - Automatically open/close tunnel ports as you add or remove tunnels
 
-If you prefer to manage firewall rules yourself, choose **Manual** mode and open the required ports yourself. Each tunnel you create gets its own port (starting around 20000) — Gopher shows the assigned port when you create one.
+If you prefer to manage firewall rules yourself, choose **Manual** mode and open the required ports yourself. Each tunnel you create gets its own port, assigned automatically from 1024 up (skipping any port already in use) — Gopher shows the assigned port when you create one.
 
 ### Cloud-level firewall / security groups
 

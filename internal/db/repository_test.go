@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,41 @@ func initTestDB(t *testing.T) {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	if err := Initialize(dsn); err != nil {
 		t.Fatalf("failed to init test db: %v", err)
+	}
+	// Make port allocation deterministic — bypass the OS bind-test, which
+	// depends on what's actually listening on the test host. Tests that want to
+	// exercise the OS-occupancy path override portAvailable themselves.
+	orig := portAvailable
+	portAvailable = func(int) bool { return true }
+	t.Cleanup(func() { portAvailable = orig })
+}
+
+// TestNextRatholePort_SkipsOSOccupiedPort: the allocator must skip a port that's
+// in use at the OS level even though Gopher's DB doesn't know about it.
+func TestNextRatholePort_SkipsOSOccupiedPort(t *testing.T) {
+	initTestDB(t) // stubs portAvailable = always-true
+	portAvailable = func(p int) bool { return p != 1024 }
+
+	got, err := NextRatholePort()
+	if err != nil {
+		t.Fatalf("NextRatholePort: %v", err)
+	}
+	if got != 1025 {
+		t.Fatalf("expected allocator to skip OS-occupied 1024 and return 1025, got %d", got)
+	}
+}
+
+// TestOSPortAvailable_DetectsListener: a port we're actively listening on must
+// be reported unavailable by the real OS check.
+func TestOSPortAvailable_DetectsListener(t *testing.T) {
+	l, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer l.Close()
+	busy := l.Addr().(*net.TCPAddr).Port
+	if osPortAvailable(busy) {
+		t.Errorf("port %d is actively listening but osPortAvailable reported it free", busy)
 	}
 }
 

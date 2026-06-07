@@ -2,6 +2,8 @@ package db
 
 import (
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -252,6 +254,38 @@ func allUsedPorts() (map[int]bool, error) {
 // (bootstrap allocates an SSH tunnel port and an agent port together; the
 // first allocation isn't persisted by the time the second one queries the
 // DB, so without this both calls would return the same port).
+// portAvailable reports whether a port is free to bind. It's a package var so
+// tests can stub it for deterministic allocation.
+var portAvailable = osPortAvailable
+
+// osPortAvailable checks the OS, not just Gopher's DB: it tries to bind the port
+// (TCP and UDP) on all interfaces. This catches ports occupied by anything on
+// the edge that the DB view can't see — including Gopher's own services
+// (22/80/443/2333/4321) and whatever else the operator happens to run. It's
+// best-effort: a small TOCTOU window remains between this check and rathole's
+// actual bind, but it turns "something's already listening there" from a silent
+// rathole bind failure into a skipped port.
+func osPortAvailable(port int) bool {
+	addr := net.JoinHostPort("", strconv.Itoa(port))
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	_ = l.Close()
+	pc, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		return false
+	}
+	_ = pc.Close()
+	return true
+}
+
+// NextRatholePort returns the lowest free edge port for a new tunnel. It starts
+// at 1024 on purpose: the edge is a dedicated box and short, low port numbers
+// are far easier to remember/type than 5-digit ones on the rare occasion an
+// operator touches the raw port (a TCP tunnel, or `ssh localhost:<port>`). A
+// port is "free" only if it's unused in Gopher's DB AND not currently bound by
+// any process on the host.
 func NextRatholePort(excluding ...int) (int, error) {
 	used, err := allUsedPorts()
 	if err != nil {
@@ -262,11 +296,13 @@ func NextRatholePort(excluding ...int) (int, error) {
 			used[p] = true
 		}
 	}
-	port := 1024
-	for used[port] {
-		port++
+	for port := 1024; port <= 65535; port++ {
+		if used[port] || !portAvailable(port) {
+			continue
+		}
+		return port, nil
 	}
-	return port, nil
+	return 0, fmt.Errorf("no free rathole port available in 1024-65535")
 }
 
 func CheckSubdomainExists(subdomain string) (bool, error) {
