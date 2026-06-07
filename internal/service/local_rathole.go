@@ -174,8 +174,11 @@ func (s *LocalSetupService) AddServiceTunnel(tunnel *db.Tunnel, machine *db.Mach
 		return fmt.Errorf("failed to update server.toml: %w", err)
 	}
 
-	// --- 3. Update managed Caddy entry if subdomain is set (TCP only; UDP/private have no HTTP routing) ---
-	if tunnel.Subdomain != "" && settings.Domain != "" && tunnel.Transport != "udp" && !tunnel.Private {
+	// --- 3. Update managed Caddy entry if subdomain is set. Private tunnels
+	// still get a Caddy block — they're reverse-proxy-only (Caddy reaches their
+	// 127.0.0.1-bound rathole port), they just have no raw public port. Only
+	// UDP has no HTTP routing. ---
+	if tunnel.Subdomain != "" && settings.Domain != "" && tunnel.Transport != "udp" {
 		if err := ensureManagedCaddyLayout(); err != nil {
 			return fmt.Errorf("failed to prepare Caddy managed layout: %w", err)
 		}
@@ -183,7 +186,7 @@ func (s *LocalSetupService) AddServiceTunnel(tunnel *db.Tunnel, machine *db.Mach
 			return fmt.Errorf("failed to write router Caddy file: %w", err)
 		}
 		managedPath := managedTunnelCaddyPath(tunnel.ID)
-		block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, settings.BindIP, tunnel.TLSSkipVerify)
+		block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, settings.BindIP, tunnel.TLSSkipVerify, tunnel.Private)
 		if err := writeLocalFile(managedPath, block); err != nil {
 			return fmt.Errorf("failed to write tunnel Caddy file %s: %w", managedPath, err)
 		}
@@ -375,7 +378,7 @@ func (s *LocalSetupService) WriteServiceTunnelCaddy(tunnel *db.Tunnel) error {
 		return nil
 	}
 	managedPath := managedTunnelCaddyPath(tunnel.ID)
-	block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, settings.BindIP, tunnel.TLSSkipVerify)
+	block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, settings.BindIP, tunnel.TLSSkipVerify, tunnel.Private)
 	if err := writeLocalFile(managedPath, block); err != nil {
 		return fmt.Errorf("write caddy block for %s: %w", tunnel.ID, err)
 	}

@@ -48,7 +48,7 @@ func (s *LocalSetupService) ReconcileRouterCaddyBlock() {
 	}
 }
 
-func buildTunnelCaddyBlock(subdomain, domain string, ratholePort int, noTLS bool, botProtected bool, bindIP string, tlsSkipVerify bool) string {
+func buildTunnelCaddyBlock(subdomain, domain string, ratholePort int, noTLS bool, botProtected bool, bindIP string, tlsSkipVerify bool, private bool) string {
 	scheme := ""
 	if noTLS {
 		scheme = "http://"
@@ -62,7 +62,10 @@ func buildTunnelCaddyBlock(subdomain, domain string, ratholePort int, noTLS bool
 	// is on 127.0.0.1, so those always use localhost regardless of bind_ip.
 	upstreamPort := ratholePort
 	upstream := "localhost"
-	if bindIP != "" {
+	// Public tunnels bind to bind_ip; private tunnels bind to 127.0.0.1 (only
+	// Caddy reaches them), so private must proxy via localhost regardless of
+	// bind_ip — otherwise Caddy would proxy to an address the tunnel isn't on.
+	if bindIP != "" && !private {
 		upstream = bindIP
 	}
 	if botProtected {

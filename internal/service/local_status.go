@@ -940,10 +940,12 @@ func (s *LocalSetupService) reconcileAllTunnelCaddyBlocks(settings *db.AppSettin
 	}
 	reloaded := false
 	for _, t := range tunnels {
-		if t.Subdomain == "" || t.Private || t.Transport == "udp" {
+		// Private tunnels keep a Caddy block (reverse-proxy-only); only skip
+		// tunnels with no subdomain or UDP (no HTTP routing).
+		if t.Subdomain == "" || t.Transport == "udp" {
 			continue
 		}
-		block := buildTunnelCaddyBlock(t.Subdomain, settings.Domain, t.RatholePort, t.NoTLS, t.BotProtectionEnabled, settings.BindIP, t.TLSSkipVerify)
+		block := buildTunnelCaddyBlock(t.Subdomain, settings.Domain, t.RatholePort, t.NoTLS, t.BotProtectionEnabled, settings.BindIP, t.TLSSkipVerify, t.Private)
 		path := managedTunnelCaddyPath(t.ID)
 		if err := writeLocalFile(path, block); err != nil {
 			return fmt.Errorf("failed to rewrite Caddy block for tunnel %s: %w", t.ID, err)

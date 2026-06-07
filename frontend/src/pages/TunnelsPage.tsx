@@ -358,7 +358,11 @@ export default function TunnelsPage() {
                                       className="text-blue-600 hover:underline">{t.subdomain}.{domain}</a>
                                   )}
                                   {isPrivate ? (
-                                    <span className="text-gray-400">VPS-local <span className="text-gray-500">:{t.rathole_port}</span></span>
+                                    t.subdomain && domain ? (
+                                      <span className="text-gray-400">via reverse proxy <span className="text-gray-500">:{t.rathole_port}</span></span>
+                                    ) : (
+                                      <span className="text-gray-400">VPS-local <span className="text-gray-500">:{t.rathole_port}</span></span>
+                                    )
                                   ) : (
                                     <span className="text-gray-500">
                                       {t.transport === 'udp' && <span className="text-purple-600 font-semibold mr-0.5">UDP</span>}

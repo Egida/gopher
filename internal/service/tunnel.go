@@ -304,10 +304,10 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 	tunnel.Name = req.Name
 	tunnel.LocalPort = req.LocalPort
 	tunnel.Private = req.Private
-	// Private tunnels cannot have a public subdomain URL
-	if req.Private {
-		tunnel.Subdomain = ""
-	}
+	// Private tunnels KEEP their subdomain — "private" means the rathole port
+	// binds to 127.0.0.1 (no raw public port), but the tunnel is still served
+	// via its Caddy subdomain (reverse-proxy-only). Clearing the subdomain here
+	// was the bug that made the URL hint vanish on toggle-to-private.
 	// Bot protection requires a subdomain and TCP transport.
 	tunnel.BotProtectionEnabled = req.BotProtectionEnabled && tunnel.Subdomain != "" && tunnel.Transport != "udp"
 	tunnel.BotProtectionTTL = req.BotProtectionTTL
@@ -326,6 +326,13 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 			log.Printf("tunnel update: reconcile failed: %v", err)
 		}
 		ApplyTunnelPort(tunnel.RatholePort, tunnel.Transport, tunnel.Private)
+		// The Caddy upstream depends on privacy (private → localhost, public →
+		// bind_ip), and on a bind_ip host the existing block is now stale. The
+		// subdomain itself didn't change, so rewrite it here. No-ops without a
+		// subdomain or configured domain.
+		if err := s.local.WriteServiceTunnelCaddy(tunnel); err != nil {
+			log.Printf("tunnel update: rewrite caddy block after privacy change for %s: %v", tunnel.ID, err)
+		}
 	}
 
 	// If LocalPort changed, the client.toml's `local_addr = "localhost:<port>"`
@@ -354,9 +361,10 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 			if err := s.local.RemoveServiceTunnelCaddy(tunnel); err != nil {
 				log.Printf("tunnel update: remove caddy block for %s: %v", tunnel.ID, err)
 			}
-		case tunnel.Transport != "udp" && !tunnel.Private:
-			// Subdomain set/changed → (re)write the block. No-ops if no domain
-			// is configured. The managed file is keyed by tunnel ID, so the
+		case tunnel.Transport != "udp":
+			// Subdomain set/changed → (re)write the block (private tunnels
+			// included — they're reverse-proxy-only). No-ops if no domain is
+			// configured. The managed file is keyed by tunnel ID, so the
 			// rewrite replaces the old subdomain's block in place.
 			if err := s.local.WriteServiceTunnelCaddy(tunnel); err != nil {
 				log.Printf("tunnel update: rewrite caddy block for %s: %v", tunnel.ID, err)

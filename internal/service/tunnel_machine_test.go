@@ -271,6 +271,46 @@ func TestTunnelUpdate_NameOnlyChangeLeavesCaddyAlone(t *testing.T) {
 	}
 }
 
+// Regression for "private mode removes URL hint": toggling a tunnel to private
+// must KEEP its subdomain (private = reverse-proxy-only, not fully hidden) and
+// rewrite the Caddy block (the upstream depends on privacy). The old code wiped
+// the subdomain on private, so the dashboard URL hint vanished.
+func TestTunnelUpdate_ToggleToPrivateKeepsSubdomainAndRewritesCaddy(t *testing.T) {
+	initTestDB(t)
+	seedDomain(t, "example.com")
+	seedMachine(t, "m1", 10051)
+	seedTunnel(t, "t1", "m1", 3000, 20051)
+	tun, err := db.GetTunnel("t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tun.Subdomain = "api"
+	tun.Transport = "tcp"
+	if err := db.UpdateTunnel(tun); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeLocalOps{}
+	svc := NewTunnelService(fake)
+	if _, err := svc.Update("t1", dto.UpdateTunnelRequest{Name: "t1", Subdomain: "api", LocalPort: 3000, Private: true}); err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+
+	got, err := db.GetTunnel("t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Subdomain != "api" {
+		t.Fatalf("toggle-to-private must KEEP the subdomain; got %q", got.Subdomain)
+	}
+	if !got.Private {
+		t.Fatalf("expected tunnel to be private")
+	}
+	if !fake.hasCall("caddy-write:t1") {
+		t.Fatalf("toggle-to-private must rewrite the Caddy block (upstream depends on privacy); got %v", fake.calls)
+	}
+}
+
 func TestMachineDelete_DeletesTunnelsThenMachineClientThenMachine(t *testing.T) {
 	initTestDB(t)
 	seedMachine(t, "m1", 10021)
