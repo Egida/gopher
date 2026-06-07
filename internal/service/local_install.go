@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/db"
 )
 
@@ -336,7 +337,7 @@ func installLocalCaddy(logWriter io.Writer) error {
 		steps := [][]string{
 			append(sudo, "bash", "-c", `curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --batch --yes --no-tty -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg`),
 			append(sudo, "bash", "-c", `curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/config.rpm.txt' | tee /etc/yum.repos.d/caddy-stable.repo`),
-			append(sudo, pm, "install", "-y", "caddy"),
+			append(sudo, pm, "install", "-y", "caddy-"+build.CaddyVersion),
 		}
 		for _, args := range steps {
 			if err := runLocalCmd(logWriter, args[0], args[1:]...); err != nil {
@@ -350,7 +351,7 @@ func installLocalCaddy(logWriter io.Writer) error {
 			append(sudo, "bash", "-c", `curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --batch --yes --no-tty -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg`),
 			append(sudo, "bash", "-c", `curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list`),
 			append(sudo, "apt-get", "update", "-y"),
-			append(sudo, "apt-get", "install", "-y", "caddy"),
+			append(sudo, "apt-get", "install", "-y", "caddy="+build.CaddyVersion),
 		}
 		for _, args := range steps {
 			if err := runLocalCmd(logWriter, args[0], args[1:]...); err != nil {
@@ -362,7 +363,6 @@ func installLocalCaddy(logWriter io.Writer) error {
 }
 
 func installLocalRathole(logWriter io.Writer) error {
-	const version = "v0.5.0"
 	var archTag string
 	switch runtime.GOARCH {
 	case "arm64":
@@ -371,8 +371,8 @@ func installLocalRathole(logWriter io.Writer) error {
 		archTag = "x86_64-unknown-linux-gnu"
 	}
 	url := fmt.Sprintf(
-		"https://github.com/rathole-org/rathole/releases/download/%s/rathole-%s.zip",
-		version, archTag,
+		"https://github.com/%s/releases/download/%s/rathole-%s.zip",
+		build.RatholeRepo, build.RatholeVersion, archTag,
 	)
 
 	// Ensure unzip is available before attempting to extract.

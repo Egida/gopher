@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/smalex-z/gopher/internal/build"
 )
 
 //go:embed templates/client-install.sh
@@ -38,7 +40,7 @@ func DeployClient(client *SSHClient, machineID, username, config string, logWrit
 	_, _ = client.Execute(sudo("systemctl stop rathole-client") + " 2>/dev/null || true")
 
 	fmt.Fprintln(logWriter, "Step 1: Installing rathole binary...")
-	if err := client.UploadFile([]byte(clientInstallScript), "/tmp/client-install.sh"); err != nil {
+	if err := client.UploadFile([]byte(build.InjectVersions(clientInstallScript)), "/tmp/client-install.sh"); err != nil {
 		return fmt.Errorf("failed to upload install script: %w", err)
 	}
 	if err := ExecuteWithOutput(client, "chmod +x /tmp/client-install.sh && /tmp/client-install.sh", logWriter); err != nil {

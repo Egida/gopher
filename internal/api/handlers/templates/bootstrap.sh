@@ -139,7 +139,7 @@ if ! command -v rathole &>/dev/null && [ ! -f "$HOME/.local/bin/rathole" ]; then
     armv7l)  ARCH_TAG="armv7-unknown-linux-musleabihf" ;;
     *)       echo "ERROR: Unsupported architecture: $ARCH"; exit 1 ;;
   esac
-  RATHOLE_URL="https://github.com/rathole-org/rathole/releases/download/v0.5.0/rathole-${ARCH_TAG}.zip"
+  RATHOLE_URL="https://github.com/__RATHOLE_REPO__/releases/download/__RATHOLE_VERSION__/rathole-${ARCH_TAG}.zip"
   rm -rf /tmp/rathole-dl
   mkdir -p /tmp/rathole-dl
   echo "  Downloading from $RATHOLE_URL ..."

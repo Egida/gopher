@@ -9,6 +9,7 @@ import (
 	"text/template"
 
 	"github.com/smalex-z/gopher/internal/api/response"
+	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/db"
 	"github.com/smalex-z/gopher/internal/service"
 )
@@ -105,7 +106,7 @@ func (h *BootstrapHandler) Register(w http.ResponseWriter, r *http.Request) {
 // GET /static/bootstrap.sh - serve bootstrap script dynamically
 func (h *BootstrapHandler) ServeScript(w http.ResponseWriter, r *http.Request) {
 	base := hostURL(r)
-	script := generateBootstrapScript(base)
+	script := build.InjectVersions(generateBootstrapScript(base))
 	w.Header().Set("Content-Type", "text/x-shellscript")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, script)
