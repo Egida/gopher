@@ -1,4 +1,6 @@
-# 🐹 Gopher
+<p align="left">
+  <img src="frontend/public/gopher_banner.png" alt="Gopher" width="440">
+</p>
 
 **Public router for private services.** A self-hosted edge server that exposes homelab services to the internet without opening ports.
 
@@ -28,7 +30,6 @@ vault.yourdomain.com  → Bitwarden on Raspberry Pi (behind NAT)
 - [Firewall Setup](#firewall-setup)
 - [VPS Recommendations](#vps-recommendations)
 - [Built on Caddy and rathole](#built-on-caddy-and-rathole)
-- [Development](#development)
 - [Contributing](#contributing)
 
 ---
@@ -421,24 +422,12 @@ If you find Gopher useful, please consider starring those projects too.
 
 ---
 
-## Development
-
-```bash
-# Dev mode (hot reload on both frontend and backend)
-./scripts/dev.sh
-# Frontend: http://localhost:5173
-# Backend:  http://localhost:4321
-
-# Production build
-./scripts/build.sh
-./gopher
-```
-
----
-
 ## Contributing
 
 Issues and PRs welcome. See [open issues](https://github.com/smalex-z/gopher/issues).
+
+For local development, `./scripts/dev.sh` runs both ends with hot reload (frontend on
+`:5173`, backend on `:4321`); `./scripts/build.sh` produces the release binary.
 
 Areas that would help most:
 - Testing on different distros and VPS providers
