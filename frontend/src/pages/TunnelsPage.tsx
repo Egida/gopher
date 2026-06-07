@@ -352,21 +352,18 @@ export default function TunnelsPage() {
                             <td className="px-4 py-3 text-gray-600">{getMachineName(t.machine_id)}</td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2 font-mono text-xs text-gray-700">
-                                {/* hop 1: public HTTPS via Caddy (only when a subdomain is routed) */}
-                                {t.subdomain && domain && (
-                                  <>
+                                <div className="flex flex-col gap-0.5">
+                                  {t.subdomain && domain && (
                                     <a href={`https://${t.subdomain}.${domain}`} target="_blank" rel="noopener noreferrer"
                                       className="text-blue-600 hover:underline">{t.subdomain}.{domain}</a>
-                                    <ArrowRight size={12} className="text-gray-400 shrink-0" />
-                                  </>
-                                )}
-                                {/* hop 2: the edge bind — 127.0.0.1 for private, the server host for public */}
-                                <span className={isPrivate ? 'text-gray-400' : 'text-gray-500'}>
-                                  {t.transport === 'udp' && <span className="text-purple-600 font-semibold mr-0.5">UDP</span>}
-                                  {isPrivate ? '127.0.0.1' : (displayHost ?? 'server')}:{t.rathole_port}
-                                </span>
+                                  )}
+                                  {/* edge bind — 127.0.0.1 for private, server host for public */}
+                                  <span className={isPrivate ? 'text-gray-400' : 'text-gray-500'}>
+                                    {t.transport === 'udp' && <span className="text-purple-600 font-semibold mr-0.5">UDP</span>}
+                                    {isPrivate ? '127.0.0.1' : (displayHost ?? 'server')}:{t.rathole_port}
+                                  </span>
+                                </div>
                                 <ArrowRight size={12} className="text-gray-400 shrink-0" />
-                                {/* hop 3: the origin service */}
                                 <span>localhost:{t.local_port}</span>
                                 {(!isPrivate || (t.subdomain && domain)) && (
                                   <button onClick={() => copyUrl(t)} className="text-gray-300 hover:text-gray-600 ml-1">
@@ -496,57 +493,24 @@ export default function TunnelsPage() {
                 </select>
               </div>
 
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Transport</label>
-                  <div className="flex gap-2">
-                    {(['tcp', 'udp'] as const).map(t => (
-                      <button key={t} type="button"
-                        onClick={() => setForm(f => ({ ...f, transport: t, ...(t === 'udp' ? { subdomain: '', no_tls: false } : {}) }))}
-                        className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
-                          form.transport === t
-                            ? t === 'udp' ? 'bg-purple-600 text-white border-purple-600' : 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                        }`}>
-                        {t.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                  {form.transport === 'udp' && (
-                    <p className="text-xs text-purple-600 mt-1">UDP tunnels don't support HTTP subdomain routing.</p>
-                  )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Transport</label>
+                <div className="flex gap-2">
+                  {(['tcp', 'udp'] as const).map(t => (
+                    <button key={t} type="button"
+                      onClick={() => setForm(f => ({ ...f, transport: t, ...(t === 'udp' ? { subdomain: '', no_tls: false } : {}) }))}
+                      className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                        form.transport === t
+                          ? t === 'udp' ? 'bg-purple-600 text-white border-purple-600' : 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                      }`}>
+                      {t.toUpperCase()}
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <div className="flex items-center gap-1 mb-2">
-                    <label className="block text-sm font-medium text-gray-700">Visibility</label>
-                    <span className="relative group">
-                      <Info size={13} className="text-gray-400 cursor-help" />
-                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 w-64 bg-gray-900 text-white text-xs rounded-lg px-3 py-2 hidden group-hover:block z-50 shadow-lg pointer-events-none">
-                        <p><strong>Private</strong> binds 127.0.0.1 — the port is only reachable from the VPS itself, not the public internet.</p>
-                        <p className="mt-1"><strong>Public</strong> binds 0.0.0.0 — the port is open on all interfaces.</p>
-                        {routingEnabled && form.subdomain.trim() !== '' && (
-                          <p className="mt-1 text-blue-300">Since you have a subdomain configured, traffic will be routed through Caddy — keeping the port private is recommended.</p>
-                        )}
-                        {routingEnabled && form.subdomain.trim() === '' && (
-                          <p className="mt-1 text-gray-400">If you add a subdomain, Caddy will handle routing and you can safely keep the port private.</p>
-                        )}
-                      </div>
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    {([false, true] as const).map(priv => (
-                      <button key={String(priv)} type="button"
-                        onClick={() => setForm(f => ({ ...f, private: priv, bot_protection_enabled: priv ? f.bot_protection_enabled : false }))}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors flex items-center gap-1 ${
-                          form.private === priv
-                            ? priv ? 'bg-slate-700 text-white border-slate-700' : 'bg-green-600 text-white border-green-600'
-                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                        }`}>
-                        {priv ? <><Lock size={12} /> Private</> : <><Globe size={12} /> Public</>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {form.transport === 'udp' && (
+                  <p className="text-xs text-purple-600 mt-1">UDP tunnels don't support HTTP subdomain routing.</p>
+                )}
               </div>
 
               <div>
@@ -599,6 +563,36 @@ export default function TunnelsPage() {
                 </>
               )}
 
+              {/* Visibility — editable in both create AND edit (privacy can change post-creation) */}
+              <div>
+                <div className="flex items-center gap-1 mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Visibility</label>
+                  <span className="relative group">
+                    <Info size={13} className="text-gray-400 cursor-help" />
+                    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 w-64 bg-gray-900 text-white text-xs rounded-lg px-3 py-2 hidden group-hover:block z-50 shadow-lg pointer-events-none">
+                      <p><strong>Private</strong> binds 127.0.0.1 — the port is only reachable from the VPS itself (or via its Caddy subdomain), not directly on the public internet.</p>
+                      <p className="mt-1"><strong>Public</strong> binds 0.0.0.0 — the raw port is open on all interfaces.</p>
+                      {routingEnabled && form.subdomain.trim() !== '' && (
+                        <p className="mt-1 text-blue-300">Since you have a subdomain, traffic routes through Caddy — keeping it private is recommended.</p>
+                      )}
+                    </div>
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  {([false, true] as const).map(priv => (
+                    <button key={String(priv)} type="button"
+                      onClick={() => setForm(f => ({ ...f, private: priv, bot_protection_enabled: priv ? f.bot_protection_enabled : false }))}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors flex items-center gap-1 ${
+                        form.private === priv
+                          ? priv ? 'bg-slate-700 text-white border-slate-700' : 'bg-green-600 text-white border-green-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                      }`}>
+                      {priv ? <><Lock size={12} /> Private</> : <><Globe size={12} /> Public</>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
                 <input type="text" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="My Web App"
@@ -617,7 +611,7 @@ export default function TunnelsPage() {
                     <div className="mt-2 space-y-2">
                       {domain && (
                         <div className="text-xs px-2 py-1 rounded font-mono bg-blue-50 text-blue-700">
-                          {form.no_tls ? 'http' : 'https'}://{form.subdomain}.{domain} → localhost:{form.local_port}
+                          {form.no_tls ? 'http' : 'https'}://{form.subdomain}.{domain} → {form.private ? '127.0.0.1' : (displayHost ?? 'server')}:{form.rathole_port} → localhost:{form.local_port}
                         </div>
                       )}
                       {/* Contextual hint — SSH port escalates to a warning */}
@@ -672,6 +666,12 @@ export default function TunnelsPage() {
                     <span className="text-sm font-medium text-gray-700">Bot Protection <span className="bg-orange-100 text-orange-700 text-xs font-semibold px-1.5 py-0.5 rounded">Alpha</span></span>
                     <span className="text-xs text-gray-400 font-normal">JS proof-of-work challenge for browsers</span>
                   </label>
+                  <p className="flex items-start gap-1.5 text-xs text-gray-500 pl-6 -mt-1">
+                    <Lock size={12} className="mt-0.5 shrink-0 text-gray-400" />
+                    {form.bot_protection_enabled
+                      ? 'Requires a Private tunnel — enabling this set Visibility to Private. A public raw port would let bots skip the challenge.'
+                      : 'Requires a Private tunnel (Caddy-only). Enabling it will switch Visibility to Private, since a public raw port bypasses the challenge.'}
+                  </p>
                   {form.bot_protection_enabled && (
                     <div className="space-y-3 pl-5">
                       <div>
