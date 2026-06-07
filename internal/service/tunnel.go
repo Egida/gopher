@@ -205,6 +205,9 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 
 	// Bot protection requires a subdomain (needs Host-header routing through proxy).
 	botProtection := req.BotProtectionEnabled && req.Subdomain != "" && transport != "udp"
+	// Bot protection is only meaningful if the raw port is closed — otherwise it's
+	// trivially bypassed by hitting the rathole port directly. Enforce private.
+	private := req.Private || botProtection
 
 	tunnel := &db.Tunnel{
 		ID:                   shortToken(),
@@ -217,7 +220,7 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 		Protocol:             "tcp",
 		Transport:            transport,
 		NoTLS:                req.NoTLS,
-		Private:              req.Private,
+		Private:              private,
 		BotProtectionEnabled: botProtection,
 		BotProtectionTTL:     req.BotProtectionTTL,
 		BotProtectionAllowIP: req.BotProtectionAllowIP,
@@ -310,6 +313,11 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 	// was the bug that made the URL hint vanish on toggle-to-private.
 	// Bot protection requires a subdomain and TCP transport.
 	tunnel.BotProtectionEnabled = req.BotProtectionEnabled && tunnel.Subdomain != "" && tunnel.Transport != "udp"
+	// Bot protection is only enforceable if the raw port is closed (otherwise it's
+	// bypassed by hitting the rathole port directly), so it implies private.
+	if tunnel.BotProtectionEnabled {
+		tunnel.Private = true
+	}
 	tunnel.BotProtectionTTL = req.BotProtectionTTL
 	tunnel.BotProtectionAllowIP = req.BotProtectionAllowIP
 	tunnel.TLSSkipVerify = req.TLSSkipVerify && tunnel.Subdomain != "" && !tunnel.NoTLS && tunnel.Transport != "udp"
@@ -319,9 +327,11 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 		return nil, err
 	}
 
-	// If privacy setting changed, update rathole bind_addr and firewall.
-	if oldPrivate != req.Private && s.local != nil {
-		log.Printf("tunnel update: privacy changed for %s (private=%v), reconciling server config", tunnel.ID, req.Private)
+	// If privacy setting changed, update rathole bind_addr and firewall. Compare
+	// against the final tunnel.Private (not req.Private) — bot protection can
+	// force private even when the request didn't ask for it.
+	if oldPrivate != tunnel.Private && s.local != nil {
+		log.Printf("tunnel update: privacy changed for %s (private=%v), reconciling server config", tunnel.ID, tunnel.Private)
 		if err := s.local.ReconcileServerConfig(); err != nil {
 			log.Printf("tunnel update: reconcile failed: %v", err)
 		}

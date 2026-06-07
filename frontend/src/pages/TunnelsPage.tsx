@@ -352,25 +352,21 @@ export default function TunnelsPage() {
                             <td className="px-4 py-3 text-gray-600">{getMachineName(t.machine_id)}</td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2 font-mono text-xs text-gray-700">
-                                <div className="flex flex-col gap-0.5">
-                                  {t.subdomain && domain && (
+                                {/* hop 1: public HTTPS via Caddy (only when a subdomain is routed) */}
+                                {t.subdomain && domain && (
+                                  <>
                                     <a href={`https://${t.subdomain}.${domain}`} target="_blank" rel="noopener noreferrer"
                                       className="text-blue-600 hover:underline">{t.subdomain}.{domain}</a>
-                                  )}
-                                  {isPrivate ? (
-                                    t.subdomain && domain ? (
-                                      <span className="text-gray-400">via reverse proxy <span className="text-gray-500">:{t.rathole_port}</span></span>
-                                    ) : (
-                                      <span className="text-gray-400">VPS-local <span className="text-gray-500">:{t.rathole_port}</span></span>
-                                    )
-                                  ) : (
-                                    <span className="text-gray-500">
-                                      {t.transport === 'udp' && <span className="text-purple-600 font-semibold mr-0.5">UDP</span>}
-                                      {displayHost ?? 'server'}:{t.rathole_port}
-                                    </span>
-                                  )}
-                                </div>
+                                    <ArrowRight size={12} className="text-gray-400 shrink-0" />
+                                  </>
+                                )}
+                                {/* hop 2: the edge bind — 127.0.0.1 for private, the server host for public */}
+                                <span className={isPrivate ? 'text-gray-400' : 'text-gray-500'}>
+                                  {t.transport === 'udp' && <span className="text-purple-600 font-semibold mr-0.5">UDP</span>}
+                                  {isPrivate ? '127.0.0.1' : (displayHost ?? 'server')}:{t.rathole_port}
+                                </span>
                                 <ArrowRight size={12} className="text-gray-400 shrink-0" />
+                                {/* hop 3: the origin service */}
                                 <span>localhost:{t.local_port}</span>
                                 {(!isPrivate || (t.subdomain && domain)) && (
                                   <button onClick={() => copyUrl(t)} className="text-gray-300 hover:text-gray-600 ml-1">
@@ -540,7 +536,7 @@ export default function TunnelsPage() {
                   <div className="flex gap-2">
                     {([false, true] as const).map(priv => (
                       <button key={String(priv)} type="button"
-                        onClick={() => setForm(f => ({ ...f, private: priv }))}
+                        onClick={() => setForm(f => ({ ...f, private: priv, bot_protection_enabled: priv ? f.bot_protection_enabled : false }))}
                         className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors flex items-center gap-1 ${
                           form.private === priv
                             ? priv ? 'bg-slate-700 text-white border-slate-700' : 'bg-green-600 text-white border-green-600'
@@ -670,7 +666,7 @@ export default function TunnelsPage() {
                     <input
                       type="checkbox"
                       checked={form.bot_protection_enabled}
-                      onChange={e => setForm(f => ({ ...f, bot_protection_enabled: e.target.checked }))}
+                      onChange={e => setForm(f => ({ ...f, bot_protection_enabled: e.target.checked, private: e.target.checked ? true : f.private }))}
                       className="rounded"
                     />
                     <span className="text-sm font-medium text-gray-700">Bot Protection <span className="bg-orange-100 text-orange-700 text-xs font-semibold px-1.5 py-0.5 rounded">Alpha</span></span>

@@ -311,6 +311,37 @@ func TestTunnelUpdate_ToggleToPrivateKeepsSubdomainAndRewritesCaddy(t *testing.T
 	}
 }
 
+// Bot protection is bypassable unless the raw port is closed, so enabling it
+// must force the tunnel private even when the request asks for public.
+func TestTunnelUpdate_BotProtectionForcesPrivate(t *testing.T) {
+	initTestDB(t)
+	seedDomain(t, "example.com")
+	seedMachine(t, "m1", 10061)
+	seedTunnel(t, "t1", "m1", 3000, 20061)
+	tun, err := db.GetTunnel("t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tun.Subdomain = "api"
+	tun.Transport = "tcp"
+	if err := db.UpdateTunnel(tun); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeLocalOps{}
+	svc := NewTunnelService(fake)
+	got, err := svc.Update("t1", dto.UpdateTunnelRequest{Name: "t1", Subdomain: "api", LocalPort: 3000, Private: false, BotProtectionEnabled: true})
+	if err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	if !got.BotProtectionEnabled {
+		t.Fatalf("expected bot protection enabled")
+	}
+	if !got.Private {
+		t.Fatalf("bot protection must coerce a public tunnel to private; got Private=false")
+	}
+}
+
 func TestMachineDelete_DeletesTunnelsThenMachineClientThenMachine(t *testing.T) {
 	initTestDB(t)
 	seedMachine(t, "m1", 10021)
