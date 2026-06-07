@@ -26,8 +26,12 @@ const (
 	cookieName        = "gopher_bot_pass"
 	defaultSessionTTL = 24 * time.Hour
 	// powDifficulty is the number of leading zero hex chars required in the
-	// SHA-256 hash. 5 zeros = 20 bits of work ≈ 1–3 s on a modern browser.
-	powDifficulty = 5
+	// SHA-256 hash. This is a PoC-grade speed bump (Alpha): its real job is to
+	// filter non-JS bots, which can't run the challenge at all — so difficulty
+	// barely affects security and mostly just taxes real browsers. 4 zeros
+	// (16 bits ≈ sub-second even with the current async-digest solver) keeps it
+	// from being an 8s wall. A proper solver + adaptive difficulty is v0.2.0 work.
+	powDifficulty = 4
 )
 
 // Middleware holds the ephemeral HMAC signing key. Create once at startup with
