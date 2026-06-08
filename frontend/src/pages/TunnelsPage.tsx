@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Network, ClipboardCopy, ArrowRight, Globe, Lock, Terminal, Info, AlertTriangle, Pencil, Plus, Search, Trash2, Zap } from 'lucide-react'
+import { Network, ClipboardCopy, ArrowRight, Globe, Lock, Info, AlertTriangle, Pencil, Plus, Search, Trash2, Zap } from 'lucide-react'
 import { tunnelsApi } from '../api/tunnels'
 import { machinesApi } from '../api/machines'
 import { localApi } from '../api/local'
@@ -183,21 +183,6 @@ export default function TunnelsPage() {
         tls_skip_verify: t.tls_skip_verify,
       },
     })
-  }
-
-  // VPS config for jumpbox commands. The localStatus query above carries
-  // jumpbox_user — the dedicated, restricted system user we want operators
-  // to SSH into, not the dashboard's service user. Falls back to
-  // vps.username on legacy installs that haven't created the jumpbox user
-  // yet (re-running `gopher install` creates it and migrates the keys).
-  const { data: vpsData } = useQuery({ queryKey: ['vps'], queryFn: () => import('../api/vps').then(m => m.vpsApi.get()) })
-  const vps = vpsData?.data
-
-  const jumpboxCmd = (t: Tunnel) => {
-    if (!vps) return ''
-    const sshUser = localStatus?.jumpbox_user || vps.username
-    const vpsAddr = `${sshUser}@${vps.host}`
-    return `ssh -L ${t.local_port}:localhost:${t.rathole_port} ${vpsAddr} -N`
   }
 
   const testTunnel = async (id: string) => {
@@ -437,20 +422,6 @@ export default function TunnelsPage() {
                               </div>
                             </td>
                           </tr>
-                          {t.private && jumpboxCmd(t) && (
-                            <tr className="bg-slate-50 border-t-0">
-                              <td colSpan={6} className="px-4 pb-2 pt-0">
-                                <div className="flex items-center gap-2 text-xs text-slate-600">
-                                  <Terminal size={11} className="shrink-0" />
-                                  <span className="font-medium">Jumpbox:</span>
-                                  <code className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded select-all">{jumpboxCmd(t)}</code>
-                                  <button onClick={() => { navigator.clipboard.writeText(jumpboxCmd(t)); toast.success('Copied!') }} className="text-slate-400 hover:text-slate-600">
-                                    <ClipboardCopy size={11} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
                         </React.Fragment>
                       )
                     })}

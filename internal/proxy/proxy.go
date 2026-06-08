@@ -167,13 +167,26 @@ func (m *Middleware) handleVerify(w http.ResponseWriter, r *http.Request, tunnel
 // Forwarding
 // ---------------------------------------------------------------------------
 
-func (m *Middleware) forward(w http.ResponseWriter, r *http.Request, tunnel *db.Tunnel) {
-	// Bot-protected tunnel ports bind to bind_ip when set (same as other public
-	// tunnel ports), so we must proxy to bind_ip:port, not localhost:port.
-	ratholeHost := "localhost"
-	if settings, err := db.GetSettings(); err == nil && settings.BindIP != "" {
-		ratholeHost = settings.BindIP
+// ratholeUpstreamHost picks the host to dial for a tunnel's rathole port.
+// Private tunnels — which is ALWAYS the case for bot-protected tunnels, since
+// bot protection coerces private — bind rathole to 127.0.0.1, so they must be
+// reached via localhost. Only public tunnels bind to bind_ip and need
+// bind_ip:port here. Mirrors buildTunnelCaddyBlock's upstream selection;
+// getting this wrong sends post-challenge traffic to an address the tunnel
+// isn't listening on → connection refused → 502.
+func ratholeUpstreamHost(private bool, bindIP string) string {
+	if !private && bindIP != "" {
+		return bindIP
 	}
+	return "localhost"
+}
+
+func (m *Middleware) forward(w http.ResponseWriter, r *http.Request, tunnel *db.Tunnel) {
+	bindIP := ""
+	if settings, err := db.GetSettings(); err == nil {
+		bindIP = settings.BindIP
+	}
+	ratholeHost := ratholeUpstreamHost(tunnel.Private, bindIP)
 	target, _ := url.Parse(fmt.Sprintf("http://%s:%d", ratholeHost, tunnel.RatholePort))
 	rp := httputil.NewSingleHostReverseProxy(target)
 	rp.Director = func(req *http.Request) {
