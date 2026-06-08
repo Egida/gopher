@@ -54,7 +54,10 @@ while [ -z "$MACHINE_NAME" ]; do
   printf "Machine name cannot be empty. Try again: " >/dev/tty
   read -r MACHINE_NAME </dev/tty
 done
-SSH_USER="$USER"
+# $USER isn't guaranteed to be set under `curl | bash` (cron, minimal sudo,
+# bare containers). Fall back to the real user so the rathole-client systemd
+# unit never silently gets User= empty (which runs it as root).
+SSH_USER="${USER:-$(id -un)}"
 echo "SSH user: $SSH_USER"
 
 handle_sudo_failure() {
@@ -113,6 +116,19 @@ AGENT_PORT=$(_json agent_local_port 2>/dev/null || echo "")
 
 if [ -z "$TUNNEL_PORT" ] || [ "$TUNNEL_PORT" = "null" ]; then
   echo "ERROR: Unexpected response from server."
+  echo "$RESPONSE"
+  exit 1
+fi
+# Guard the other required fields too — a partial/garbled response would
+# otherwise write an empty client.toml (and skip the server key), leaving a
+# half-installed machine that silently never connects.
+if [ -z "$RATHOLE_CONFIG" ] || [ "$RATHOLE_CONFIG" = "null" ]; then
+  echo "ERROR: server did not return a rathole client config; aborting."
+  echo "$RESPONSE"
+  exit 1
+fi
+if [ -z "$VPS_PUBLIC_KEY" ] || [ "$VPS_PUBLIC_KEY" = "null" ]; then
+  echo "ERROR: server did not return its SSH public key; aborting."
   echo "$RESPONSE"
   exit 1
 fi

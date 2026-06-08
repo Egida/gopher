@@ -559,7 +559,7 @@ func TestGenerateAddsPlaceholderWhenAllEntriesIncomplete(t *testing.T) {
 	if !strings.Contains(cfg, "[server.services.placeholder]") {
 		t.Error("Should include placeholder when all entries are skipped")
 	}
-	if !strings.Contains(cfg, "bind_addr = \"0.0.0.0:52000\"") {
-		t.Error("Placeholder bind_addr should be present")
+	if !strings.Contains(cfg, "bind_addr = \"127.0.0.1:52000\"") {
+		t.Error("Placeholder bind_addr should bind loopback (never reached, no reason to expose publicly)")
 	}
 }

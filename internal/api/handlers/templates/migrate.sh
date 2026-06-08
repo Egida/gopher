@@ -97,10 +97,16 @@ case "$ARCH" in
   *) echo "ERROR: unsupported arch $ARCH" >&2; exit 1 ;;
 esac
 
+AGENT_DL_URL="$HOST_URL/static/agents/gopher-agent-$ARCH_TAG"
+# Try TLS-verified first; only fall back to no-verify if that fails (e.g. the
+# edge is reached by IP / self-signed cert). Avoids silently MITM-able download
+# of a root-run binary when a valid cert is in fact available.
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL --insecure "$HOST_URL/static/agents/gopher-agent-$ARCH_TAG" -o /tmp/gopher-agent.new
+  curl -fsSL "$AGENT_DL_URL" -o /tmp/gopher-agent.new \
+    || curl -fsSL --insecure "$AGENT_DL_URL" -o /tmp/gopher-agent.new
 elif command -v wget >/dev/null 2>&1; then
-  wget -q --no-check-certificate "$HOST_URL/static/agents/gopher-agent-$ARCH_TAG" -O /tmp/gopher-agent.new
+  wget -q "$AGENT_DL_URL" -O /tmp/gopher-agent.new \
+    || wget -q --no-check-certificate "$AGENT_DL_URL" -O /tmp/gopher-agent.new
 else
   echo "ERROR: neither curl nor wget is available" >&2
   exit 1
