@@ -171,7 +171,18 @@ func (c *SSHClient) UploadFileSudoInPlace(content []byte, remotePath, owner stri
 	// `sudo tee` truncates+rewrites in place — same inode as before, which
 	// keeps rathole's notify watcher subscribed. Discard tee's stdout so
 	// it doesn't echo the file content back over the SSH session.
-	cmd := fmt.Sprintf("sudo tee %q < %q > /dev/null", remotePath, tmpPath)
+	//
+	// Pre-flight a free-space check: tee opens with O_TRUNC, so a disk-full
+	// write would leave client.toml truncated and the notify watcher would
+	// hot-reload a broken config, dropping every tunnel on the machine (the
+	// corruption the agent path's statfs guard prevents). Fail-open if df can't
+	// be read — this is defense, not a hard gate.
+	neededKB := len(content)/1024 + 64
+	cmd := fmt.Sprintf(
+		`avail=$(df -Pk "$(dirname %q)" 2>/dev/null | awk 'NR==2{print $4}'); `+
+			`if [ "${avail:-999999999}" -lt %d ]; then echo "insufficient disk space (${avail}KB free, need %dKB)" >&2; exit 28; fi; `+
+			`sudo tee %q < %q > /dev/null`,
+		remotePath, neededKB, neededKB, remotePath, tmpPath)
 	if owner != "" {
 		cmd += fmt.Sprintf(" && sudo chown %q %q", owner, remotePath)
 	}

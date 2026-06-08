@@ -149,7 +149,12 @@ func main() {
 		Handler:           srv.httpHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		// /self-update downloads the new binary (up to 60s) synchronously before
+		// writing its response, so the write window must exceed that — otherwise
+		// the VPS sees the connection cut and reports a spurious "upgrade failed"
+		// even though the agent did update. This server is loopback-only (reached
+		// via the rathole back-channel), so a long write timeout poses no DoS risk.
+		WriteTimeout: 80 * time.Second,
 	}
 
 	go func() {
