@@ -13,15 +13,25 @@ import (
 
 // VPS Repository
 
+// GetVPS returns the edge's identity (host + domain) synthesized from
+// AppSettings. The old vps_configs table is no longer written (the remote-VPS
+// management flow was removed), so reading it directly always 404'd — which the
+// dashboard's jumpbox-command builder turned into a crash on installs without a
+// jumpbox user. Deriving from settings keeps GET /api/vps and /api/status
+// working. Returns NotFound only when the edge genuinely isn't configured yet.
 func GetVPS() (*VPSConfig, error) {
-	var vps VPSConfig
-	if err := DB.First(&vps).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, &apperrors.NotFoundError{Resource: "vps_config", ID: "singleton"}
-		}
+	settings, err := GetSettings()
+	if err != nil {
 		return nil, err
 	}
-	return &vps, nil
+	host := settings.ServerHost
+	if host == "" {
+		host = settings.Domain
+	}
+	if host == "" {
+		return nil, &apperrors.NotFoundError{Resource: "vps_config", ID: "singleton"}
+	}
+	return &VPSConfig{Host: host, Domain: settings.Domain}, nil
 }
 
 // Machine Repository
@@ -324,6 +334,15 @@ func CheckRatholePortExists(port int) (bool, error) {
 		return true, nil
 	}
 	if err := DB.Model(&Machine{}).Where("tunnel_port = ?", port).Count(&count).Error; err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+	// Also reserve agent back-channel ports — allUsedPorts() (the auto-allocator)
+	// excludes them, so the user-supplied-port path must too, or an explicit
+	// rathole_port can collide with a machine's agent port → duplicate bind_addr.
+	if err := DB.Model(&Machine{}).Where("agent_remote_port = ?", port).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil

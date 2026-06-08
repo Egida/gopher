@@ -132,29 +132,38 @@ func (s *MachineService) delete(id string, fromClient bool) (*DeleteResult, erro
 		}
 	}
 
-	// Delete each tunnel from DB, then do a single reconcile + Caddy cleanup.
+	// Best-effort teardown. The client was already uninstalled above, so bailing
+	// on the first error would leave the DB / server.toml / Caddy diverged (a
+	// half-deleted machine whose client is gone). Push through every deletion and
+	// always run the final reconcile so state converges; collect failures and
+	// report them at the end.
+	var cleanupErrs []string
 	for i := range tunnels {
 		tunnel := &tunnels[i]
 		if err := db.DeleteTunnel(tunnel.ID); err != nil {
-			return nil, err
+			cleanupErrs = append(cleanupErrs, fmt.Sprintf("delete tunnel %s: %v", tunnel.ID, err))
 		}
 		if s.local != nil {
 			if err := s.local.RemoveServiceTunnelCaddy(tunnel); err != nil {
-				return nil, err
+				cleanupErrs = append(cleanupErrs, fmt.Sprintf("caddy cleanup %s: %v", tunnel.ID, err))
 			}
 		}
 	}
 
 	db.LogEvent("machine_deleted", id, machine.Name)
 	if err := db.DeleteMachine(id); err != nil {
-		return nil, err
+		cleanupErrs = append(cleanupErrs, fmt.Sprintf("delete machine: %v", err))
 	}
 
-	// Single reconcile after all DB deletions — avoids multiple rathole restarts.
+	// Single reconcile after all DB deletions — run it regardless of the above so
+	// server.toml converges to what's left (avoids multiple rathole restarts).
 	if s.local != nil {
 		if err := s.local.ReconcileServerConfig(); err != nil {
-			return nil, err
+			cleanupErrs = append(cleanupErrs, fmt.Sprintf("server reconcile: %v", err))
 		}
+	}
+	if len(cleanupErrs) > 0 {
+		return result, fmt.Errorf("machine teardown incomplete (will self-heal on next reconcile): %s", strings.Join(cleanupErrs, "; "))
 	}
 	return result, nil
 }

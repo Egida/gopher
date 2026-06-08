@@ -244,9 +244,20 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 		log.Printf("tunnel create: pushing config for tunnel %s to machine %s (port %d)", tunnel.ID, machine.ID, machine.TunnelPort)
 		if cfgErr := s.local.AddServiceTunnel(tunnel, machine); cfgErr != nil {
 			log.Printf("tunnel create: config push failed for tunnel %s: %v", tunnel.ID, cfgErr)
-			// Annotate the tunnel with the error but don't fail the creation
+			// Annotate status (transient — the 30s monitor overwrites it) AND
+			// record a persistent event, so the operator can still tell "config
+			// push failed" from a plain "offline" after the status is clobbered.
 			tunnel.Status = fmt.Sprintf("config-error: %v", cfgErr)
 			_ = db.UpdateTunnel(tunnel)
+			db.RecordEvent(&db.Event{
+				Severity:     "error",
+				Source:       "tunnel",
+				Kind:         "tunnel_config_error",
+				ResourceType: "tunnel",
+				ResourceID:   tunnel.ID,
+				ResourceName: tunnel.Name,
+				Message:      fmt.Sprintf("Tunnel %q config push failed — it won't serve until fixed: %v", tunnel.Name, cfgErr),
+			})
 		} else {
 			log.Printf("tunnel create: config push succeeded for tunnel %s", tunnel.ID)
 		}
@@ -461,11 +472,19 @@ func (s *TunnelService) Delete(id string) error {
 	RevokeTunnelPort(tunnel.RatholePort, tunnel.Transport)
 
 	if s.local != nil {
+		// Best-effort: the DB row is already gone (the source of truth for the
+		// next reconcile), so run BOTH cleanup steps even if one fails — a
+		// reconcile error must not skip the Caddy-block removal, or the
+		// subdomain keeps 502-serving a tunnel that no longer exists.
+		var cleanupErrs []string
 		if err := s.local.ReconcileServerConfig(); err != nil {
-			return err
+			cleanupErrs = append(cleanupErrs, fmt.Sprintf("server reconcile: %v", err))
 		}
 		if err := s.local.RemoveServiceTunnelCaddy(tunnel); err != nil {
-			return err
+			cleanupErrs = append(cleanupErrs, fmt.Sprintf("caddy cleanup: %v", err))
+		}
+		if len(cleanupErrs) > 0 {
+			return fmt.Errorf("tunnel deleted, but edge cleanup was incomplete (will self-heal on next reconcile): %s", strings.Join(cleanupErrs, "; "))
 		}
 	}
 	return nil

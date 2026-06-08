@@ -182,11 +182,13 @@ func GenerateRatholeServerConfig(machines []db.Machine, tunnels []db.Tunnel, bin
 		managedEntries++
 	}
 
-	// Add placeholder if no entries to keep rathole happy (requires at least one service)
+	// Add placeholder if no entries to keep rathole happy (requires at least one
+	// service). Bind it to loopback — it's never reached, so there's no reason
+	// to expose a listener on the public interface of a fresh install.
 	if managedEntries == 0 {
 		buf.WriteString("\n[server.services.placeholder]\n")
 		buf.WriteString("token = \"placeholder\"\n")
-		buf.WriteString(fmt.Sprintf("bind_addr = \"%s:52000\"\n", publicHost))
+		buf.WriteString("bind_addr = \"127.0.0.1:52000\"\n")
 	}
 
 	return buf.String()
