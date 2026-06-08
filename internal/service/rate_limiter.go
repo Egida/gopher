@@ -85,19 +85,24 @@ func (rl *loginRateLimiter) cleanup() {
 	}
 }
 
-// ClientIP extracts the real client IP from a request, respecting
-// X-Forwarded-For set by Caddy when the request comes through the proxy.
+// ClientIP extracts the real client IP from a request. It trusts
+// X-Forwarded-For ONLY when the request came from our local Caddy (a loopback
+// peer): Caddy appends the real client as the last XFF entry, while earlier
+// entries are client-supplied and forgeable. A direct (non-loopback) connection
+// uses its RemoteAddr and ignores XFF entirely — otherwise an attacker could
+// spoof XFF to dodge the login lockout or get another IP banned.
 func ClientIP(r *http.Request) string {
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		// X-Forwarded-For may be a comma-separated list; take the first entry.
-		parts := splitAndTrim(fwd, ',')
-		if len(parts) > 0 && parts[0] != "" {
-			return parts[0]
-		}
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			parts := splitAndTrim(fwd, ',')
+			if n := len(parts); n > 0 && parts[n-1] != "" {
+				return parts[n-1]
+			}
+		}
 	}
 	return host
 }

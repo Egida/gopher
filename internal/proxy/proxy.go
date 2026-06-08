@@ -153,7 +153,11 @@ func (m *Middleware) handleVerify(w http.ResponseWriter, r *http.Request, tunnel
 		})
 	}()
 
-	if redirect == "" || redirect == "/bot-verify" {
+	// Only allow same-site, path-relative redirects. Reject absolute URLs
+	// (https://evil.com), protocol-relative (//evil.com), and back-references —
+	// otherwise the post-challenge redirect is an open redirect on the tunnel's
+	// subdomain.
+	if redirect == "" || redirect == "/bot-verify" || !strings.HasPrefix(redirect, "/") || strings.HasPrefix(redirect, "//") || strings.Contains(redirect, "..") {
 		redirect = "/"
 	}
 	http.Redirect(w, r, redirect, http.StatusSeeOther)
@@ -280,10 +284,23 @@ func isWebSocketUpgrade(r *http.Request) bool {
 }
 
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
-	}
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if host == "" {
+		host = r.RemoteAddr
+	}
+	// Trust X-Forwarded-For only from our local Caddy (loopback peer): Caddy
+	// appends the real client as the LAST entry, while earlier entries are
+	// client-supplied and forgeable. A direct (non-loopback) connection uses
+	// RemoteAddr and ignores XFF — otherwise the IP allowlist is trivially
+	// bypassed by spoofing XFF.
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+				return last
+			}
+		}
+	}
 	return host
 }
 

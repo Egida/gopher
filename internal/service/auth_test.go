@@ -177,20 +177,25 @@ func TestClientIP_FromRemoteAddr(t *testing.T) {
 	}
 }
 
-func TestClientIP_XForwardedFor(t *testing.T) {
+// From a trusted loopback peer (our Caddy), take the LAST XFF entry — the real
+// client Caddy appended. Earlier entries are client-supplied and forgeable.
+func TestClientIP_XForwardedFor_TrustedLoopback(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("X-Forwarded-For", "10.0.0.1, 10.0.0.2")
+	r.Header.Set("X-Forwarded-For", "10.0.0.1, 203.0.113.5")
 	r.RemoteAddr = "127.0.0.1:9999"
-	if got := ClientIP(r); got != "10.0.0.1" {
-		t.Errorf("ClientIP = %q, want %q (first XFF entry)", got, "10.0.0.1")
+	if got := ClientIP(r); got != "203.0.113.5" {
+		t.Errorf("ClientIP = %q, want %q (last XFF entry from trusted proxy)", got, "203.0.113.5")
 	}
 }
 
-func TestClientIP_XForwardedForSingle(t *testing.T) {
+// SECURITY: a spoofed XFF from a NON-loopback (direct) connection must be
+// ignored — RemoteAddr wins, so an attacker can't forge their IP.
+func TestClientIP_XForwardedFor_UntrustedPeerIgnored(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("X-Forwarded-For", "203.0.113.5")
-	if got := ClientIP(r); got != "203.0.113.5" {
-		t.Errorf("ClientIP = %q, want %q", got, "203.0.113.5")
+	r.Header.Set("X-Forwarded-For", "1.2.3.4")
+	r.RemoteAddr = "198.51.100.9:5555"
+	if got := ClientIP(r); got != "198.51.100.9" {
+		t.Errorf("ClientIP = %q, want %q (spoofed XFF from non-loopback peer must be ignored)", got, "198.51.100.9")
 	}
 }
 
