@@ -166,7 +166,23 @@ export default function TunnelsPage() {
   })
 
   const togglePrivate = (t: Tunnel) => {
-    updateMutation.mutate({ id: t.id, data: { name: t.name, local_port: t.local_port, subdomain: t.subdomain, private: !t.private } })
+    // Send the FULL set of fields the backend reads — omitting them makes the
+    // Go DTO decode them as false/empty and wipes bot protection, the IP
+    // allowlist, and TLS-skip on a single click. (The toggle is disabled for
+    // bot-protected tunnels in the UI, so visibility there is changed via Edit.)
+    updateMutation.mutate({
+      id: t.id,
+      data: {
+        name: t.name,
+        local_port: t.local_port,
+        subdomain: t.subdomain,
+        private: !t.private,
+        bot_protection_enabled: t.bot_protection_enabled,
+        bot_protection_ttl: t.bot_protection_ttl,
+        bot_protection_allow_ip: t.bot_protection_allow_ip,
+        tls_skip_verify: t.tls_skip_verify,
+      },
+    })
   }
 
   // VPS config for jumpbox commands. The localStatus query above carries
@@ -399,16 +415,18 @@ export default function TunnelsPage() {
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-1">
+                                {t.kind !== 'machine-agent' && (
                                 <button
                                   onClick={() => togglePrivate(t)}
-                                  disabled={updateMutation.isPending}
-                                  title={isPrivate ? 'Make public' : 'Make private'}
-                                  className={`p-1.5 rounded border ${isPrivate
+                                  disabled={updateMutation.isPending || t.bot_protection_enabled}
+                                  title={t.bot_protection_enabled ? 'Bot protection requires private — use Edit to change visibility' : (isPrivate ? 'Make public' : 'Make private')}
+                                  className={`p-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed ${isPrivate
                                     ? 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
                                     : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50 hover:text-gray-600'}`}
                                 >
                                   {isPrivate ? <Globe size={13} /> : <Lock size={13} />}
                                 </button>
+                                )}
                                 {!isProtectedTunnel && (
                                   <>
                                     <button onClick={() => openEditModal(t)} title="Edit tunnel" className="p-1.5 rounded border bg-white text-gray-400 border-gray-200 hover:bg-gray-50 hover:text-gray-600"><Pencil size={13} /></button>
