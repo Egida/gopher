@@ -88,6 +88,11 @@ func firewallTakeover(logWriter io.Writer) error {
 		return err
 	}
 
+	// Step 3b: Mirror the same default-deny baseline onto IPv6 (best-effort) so
+	// IPv4 restrictions don't silently leak over IPv6 on a dual-stack host.
+	fmt.Fprintln(logWriter, "Step 3b: Applying IPv6 baseline (ip6tables)...")
+	firewallInitRules6(logWriter, sudo)
+
 	// Step 4: Create GOPHER_TUNNELS and GOPHER_CUSTOM chains.
 	fmt.Fprintf(logWriter, "Step 4: Creating %s and %s chains...\n", gopherChain, gopherCustomChain)
 	if err := firewallCreateChain(logWriter, sudo); err != nil {
@@ -124,6 +129,7 @@ func firewallTakeover(logWriter io.Writer) error {
 	if err := firewallSaveRules(logWriter, sudo); err != nil {
 		fmt.Fprintf(logWriter, "  WARN: could not persist rules: %v\n", err)
 	}
+	firewallSaveRules6(logWriter, sudo)
 
 	// Step 7: Reload fail2ban so it recreates its chains on top of the fresh ruleset.
 	// iptables -F/-X above wiped fail2ban's f2b-* chains; without a reload, active
@@ -227,6 +233,48 @@ func firewallInitRules(logWriter io.Writer, sudo []string) error {
 		}
 	}
 	return nil
+}
+
+// firewallInitRules6 mirrors the IPv4 baseline onto ip6tables so the same
+// default-deny + allow-list applies over IPv6. Without it the IPv4 rules
+// (including the dashboard-private restriction) silently don't apply to v6 — a
+// dual-stack listener like the dashboard would stay reachable over IPv6.
+//
+// Best-effort by design: a host may have no IPv6 or no ip6tables, and the IPv4
+// firewall is the primary, so this never aborts the takeover. Allow rules are
+// added BEFORE the default-DROP policy, so a partial failure leaves IPv6 in its
+// prior (open) state rather than half-locked with no SSH.
+func firewallInitRules6(logWriter io.Writer, sudo []string) {
+	if logWriter == nil {
+		logWriter = io.Discard
+	}
+	allow := [][]string{
+		append(sudo, "ip6tables", "-F"),
+		append(sudo, "ip6tables", "-X"),
+		append(sudo, "ip6tables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT"),
+		append(sudo, "ip6tables", "-A", "INPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"),
+		append(sudo, "ip6tables", "-A", "INPUT", "-p", "tcp", "--dport", "22", "-j", "ACCEPT"),
+		append(sudo, "ip6tables", "-A", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"),
+		append(sudo, "ip6tables", "-A", "INPUT", "-p", "tcp", "--dport", "443", "-j", "ACCEPT"),
+		append(sudo, "ip6tables", "-A", "INPUT", "-p", "tcp", "--dport", "2333", "-j", "ACCEPT"),
+	}
+	for _, args := range allow {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil { // #nosec G204
+			fmt.Fprintf(logWriter, "  WARN: IPv6 firewall not applied (%s) — leaving ip6tables untouched. IPv6 may be unconfigured on this host.\n", strings.TrimSpace(string(out)))
+			return
+		}
+	}
+	deny := [][]string{
+		append(sudo, "ip6tables", "-P", "INPUT", "DROP"),
+		append(sudo, "ip6tables", "-P", "FORWARD", "DROP"),
+		append(sudo, "ip6tables", "-P", "OUTPUT", "ACCEPT"),
+	}
+	for _, args := range deny {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil { // #nosec G204
+			fmt.Fprintf(logWriter, "  WARN: ip6tables policy step failed: %s\n", strings.TrimSpace(string(out)))
+		}
+	}
+	fmt.Fprintln(logWriter, "  IPv6 baseline applied (ip6tables default-deny mirrors IPv4)")
 }
 
 func firewallCreateChain(logWriter io.Writer, sudo []string) error {
@@ -356,6 +404,36 @@ func firewallSaveRules(logWriter io.Writer, sudo []string) error {
 		fmt.Fprintln(logWriter, "  Rules saved to /etc/iptables/rules.v4")
 	}
 	return nil
+}
+
+// firewallSaveRules6 persists the ip6tables baseline so it survives reboot.
+// Best-effort mirror of firewallSaveRules for IPv6.
+func firewallSaveRules6(logWriter io.Writer, sudo []string) {
+	if logWriter == nil {
+		logWriter = io.Discard
+	}
+	saveArgs := append(sudo, "ip6tables-save")
+	out, err := exec.Command(saveArgs[0], saveArgs[1:]...).Output() // #nosec G204
+	if err != nil {
+		fmt.Fprintf(logWriter, "  WARN: ip6tables-save failed: %v (IPv6 rules won't persist across reboot)\n", err)
+		return
+	}
+	rules := string(out)
+	switch pkgManager() {
+	case "dnf", "yum":
+		if werr := writeLocalFile("/etc/sysconfig/ip6tables", rules); werr != nil {
+			fmt.Fprintf(logWriter, "  WARN: write /etc/sysconfig/ip6tables: %v\n", werr)
+			return
+		}
+		enableArgs := append(sudo, "systemctl", "enable", "ip6tables")
+		_ = runLocalCmd(logWriter, enableArgs[0], enableArgs[1:]...)
+	default: // apt — iptables-persistent (installed for v4) also restores rules.v6
+		if werr := writeLocalFile("/etc/iptables/rules.v6", rules); werr != nil {
+			fmt.Fprintf(logWriter, "  WARN: write /etc/iptables/rules.v6: %v\n", werr)
+			return
+		}
+	}
+	fmt.Fprintln(logWriter, "  IPv6 rules persisted")
 }
 
 // -- Dynamic port management -------------------------------------------------
