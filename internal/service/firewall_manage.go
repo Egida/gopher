@@ -249,6 +249,12 @@ func firewallInitRules6(logWriter io.Writer, sudo []string) {
 		logWriter = io.Discard
 	}
 	allow := [][]string{
+		// Reset INPUT to ACCEPT BEFORE flushing. On a re-run the policy is
+		// already DROP from the prior takeover; flushing then would strip the
+		// SSH allow while DROP is in force, and any later failure would return
+		// with v6 locked. Opening first means a partial failure leaves v6 open
+		// (its pre-takeover state), never half-locked.
+		append(sudo, "ip6tables", "-P", "INPUT", "ACCEPT"),
 		append(sudo, "ip6tables", "-F"),
 		append(sudo, "ip6tables", "-X"),
 		append(sudo, "ip6tables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT"),

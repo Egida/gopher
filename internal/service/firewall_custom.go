@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
@@ -70,23 +71,28 @@ func reloadCustomChain() error {
 		return fmt.Errorf("flush %s: %w (%s)", gopherCustomChain, err, strings.TrimSpace(string(out)))
 	}
 
-	// Apply structured rules from DB.
+	// Apply structured + raw rules best-effort: the chain was just flushed, so a
+	// single failing rule must NOT abort the loop — that would leave the other
+	// (valid) rules unapplied. Collect failures and report them, but apply
+	// everything that's valid.
 	rules, err := db.GetFirewallRules()
 	if err != nil {
 		return fmt.Errorf("load firewall rules: %w", err)
 	}
+	var applyErrs []string
 	for _, rule := range rules {
 		if err := applyStructuredRule(rule, sudo); err != nil {
-			return fmt.Errorf("apply rule %s: %w", rule.ID, err)
+			applyErrs = append(applyErrs, fmt.Sprintf("rule %s: %v", rule.ID, err))
 		}
 	}
-
-	// Apply raw custom iptables text from settings (already loaded above).
 	if err := applyRawCustomRules(settings.CustomIPTables, sudo); err != nil {
-		return err
+		applyErrs = append(applyErrs, err.Error())
 	}
 
 	persistRules()
+	if len(applyErrs) > 0 {
+		return fmt.Errorf("%d custom rule(s) failed to apply (the rest were applied): %s", len(applyErrs), strings.Join(applyErrs, "; "))
+	}
 	return nil
 }
 
@@ -125,6 +131,7 @@ func applyStructuredRule(rule db.FirewallRule, sudo []string) error {
 // to `iptables -A GOPHER_CUSTOM`. Lines that already start with a chain name
 // or "-A"/"-I" are passed through as-is (allowing full flexibility).
 func applyRawCustomRules(text string, sudo []string) error {
+	var errs []string
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -137,9 +144,13 @@ func applyRawCustomRules(text string, sudo []string) error {
 		} else {
 			cmdArgs = append(append([]string{}, sudo...), append([]string{"iptables", "-A", gopherCustomChain}, strings.Fields(line)...)...)
 		}
+		// Best-effort: a bad line is skipped, not allowed to abort the rest.
 		if out, err := exec.Command(cmdArgs[0], cmdArgs[1:]...).CombinedOutput(); err != nil { // #nosec G204
-			return fmt.Errorf("custom rule %q: %w (%s)", line, err, strings.TrimSpace(string(out)))
+			errs = append(errs, fmt.Sprintf("custom rule %q: %v (%s)", line, err, strings.TrimSpace(string(out))))
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -378,6 +389,16 @@ func validateFirewallRule(protocol, portRange, source, action string) error {
 	validActions := map[string]bool{"ACCEPT": true, "DROP": true, "REJECT": true}
 	if !validActions[action] {
 		return fmt.Errorf("action must be one of: ACCEPT, DROP, REJECT")
+	}
+	// Validate source up front — an invalid `-s` value makes the iptables -A
+	// fail, and since reloadCustomChain flushes before re-applying, a bad source
+	// would otherwise take down every other custom rule with it.
+	if source != "" && source != "0.0.0.0/0" {
+		if _, _, err := net.ParseCIDR(source); err != nil {
+			if net.ParseIP(source) == nil {
+				return fmt.Errorf("invalid source %q: expected an IP or CIDR (e.g. 1.2.3.4 or 1.2.3.0/24)", source)
+			}
+		}
 	}
 	if portRange != "" {
 		for _, part := range strings.Split(portRange, ":") {
