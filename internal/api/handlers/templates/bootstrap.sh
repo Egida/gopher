@@ -150,38 +150,32 @@ echo "Installing rathole..."
 if ! command -v rathole &>/dev/null && [ ! -f "$HOME/.local/bin/rathole" ]; then
   ARCH=$(uname -m)
   case "$ARCH" in
-    x86_64)  ARCH_TAG="x86_64-unknown-linux-gnu" ;;
-    aarch64) ARCH_TAG="aarch64-unknown-linux-musl" ;;
-    armv7l)  ARCH_TAG="armv7-unknown-linux-musleabihf" ;;
-    *)       echo "ERROR: Unsupported architecture: $ARCH"; exit 1 ;;
+    x86_64|aarch64|armv7l) ;;
+    *) echo "ERROR: Unsupported architecture: $ARCH"; exit 1 ;;
   esac
-  RATHOLE_URL="https://github.com/__RATHOLE_REPO__/releases/download/__RATHOLE_VERSION__/rathole-${ARCH_TAG}.zip"
-  rm -rf /tmp/rathole-dl
-  mkdir -p /tmp/rathole-dl
-  echo "  Downloading from $RATHOLE_URL ..."
-  if command -v wget &>/dev/null; then
-    wget -q "$RATHOLE_URL" -O /tmp/rathole-dl/rathole.zip || { echo "ERROR: Download failed"; exit 1; }
+  # Fetch the rathole binary the edge bundles for this arch, over the edge's TLS,
+  # instead of downloading a zip from GitHub. The edge serves a raw binary plus a
+  # ".sha256" sidecar we verify (no unzip dependency).
+  RATHOLE_URL="$HOST_URL/static/rathole/${ARCH}"
+  echo "  Downloading rathole from $RATHOLE_URL ..."
+  rm -f /tmp/rathole-dl
+  if command -v curl &>/dev/null; then
+    curl -fsSL "$RATHOLE_URL" -o /tmp/rathole-dl || { echo "ERROR: rathole download failed"; exit 1; }
+    EXPECTED_SUM=$(curl -fsSL "${RATHOLE_URL}.sha256" 2>/dev/null | awk '{print $1}')
   else
-    curl -fsSL "$RATHOLE_URL" -o /tmp/rathole-dl/rathole.zip || { echo "ERROR: Download failed"; exit 1; }
+    wget -q "$RATHOLE_URL" -O /tmp/rathole-dl || { echo "ERROR: rathole download failed"; exit 1; }
+    EXPECTED_SUM=$(wget -qO- "${RATHOLE_URL}.sha256" 2>/dev/null | awk '{print $1}')
   fi
-  if ! command -v unzip &>/dev/null; then
-    if command -v dnf &>/dev/null; then
-      echo "  unzip not found, installing via dnf..."
-      $SUDO dnf install -y -q unzip || { echo "ERROR: unzip not available and could not be installed. Install it manually and re-run."; exit 1; }
-    elif command -v yum &>/dev/null; then
-      echo "  unzip not found, installing via yum..."
-      $SUDO yum install -y -q unzip || { echo "ERROR: unzip not available and could not be installed. Install it manually and re-run."; exit 1; }
-    else
-      echo "  unzip not found, installing via apt..."
-      $SUDO apt-get install -y unzip -qq || { echo "ERROR: unzip not available and could not be installed. Install it manually and re-run."; exit 1; }
+  if [ -n "$EXPECTED_SUM" ] && command -v sha256sum &>/dev/null; then
+    ACTUAL_SUM=$(sha256sum /tmp/rathole-dl | awk '{print $1}')
+    if [ "$ACTUAL_SUM" != "$EXPECTED_SUM" ]; then
+      echo "ERROR: rathole checksum mismatch (expected $EXPECTED_SUM, got $ACTUAL_SUM)"; rm -f /tmp/rathole-dl; exit 1
     fi
+    echo "  rathole checksum verified"
   fi
-  unzip -q /tmp/rathole-dl/rathole.zip -d /tmp/rathole-dl/ || { echo "ERROR: unzip failed"; exit 1; }
-
-  $SUDO cp /tmp/rathole-dl/rathole /usr/local/bin/rathole
-  $SUDO chmod +x /usr/local/bin/rathole
+  $SUDO install -m 0755 /tmp/rathole-dl /usr/local/bin/rathole
   RATHOLE_BIN=/usr/local/bin/rathole
-  rm -rf /tmp/rathole-dl
+  rm -f /tmp/rathole-dl
 else
   RATHOLE_BIN=$(command -v rathole 2>/dev/null || echo "$HOME/.local/bin/rathole")
 fi
@@ -279,6 +273,7 @@ if [ -n "$AGENT_TOKEN" ] && [ "$AGENT_TOKEN" != "null" ] && [ -n "$AGENT_PORT" ]
   case "$(uname -m)" in
     x86_64)         AGENT_ARCH_TAG="linux-amd64" ;;
     aarch64|arm64)  AGENT_ARCH_TAG="linux-arm64" ;;
+    armv7l|armv7)   AGENT_ARCH_TAG="linux-armv7" ;;
     *)
       echo "  WARN: unsupported arch $(uname -m); skipping agent install"
       AGENT_ARCH_TAG=""
