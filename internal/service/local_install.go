@@ -6,11 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
-	"strings"
 	"time"
 
-	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/db"
 	"github.com/smalex-z/gopher/internal/embedbin"
 	"github.com/smalex-z/gopher/internal/paths"
@@ -28,9 +25,6 @@ func pkgManager() string {
 	return "apt"
 }
 
-//go:embed templates/rathole-server.service
-var ratholeServerServiceTemplate string
-
 //go:embed templates/rathole-server-initial.toml
 var ratholeServerInitialConfig string
 
@@ -39,12 +33,6 @@ var fail2banFilterConfig string
 
 //go:embed templates/fail2ban-jail.conf
 var fail2banJailConfig string
-
-func buildRatholeServiceUnit(binaryPath string) string {
-	unit := ratholeServerServiceTemplate
-	unit = strings.ReplaceAll(unit, "{{.BinaryPath}}", binaryPath)
-	return unit
-}
 
 // hasInstallPermission returns true if local setup can run with current
 // privileges. Root always passes. For non-root users, sudo must be available
@@ -301,85 +289,3 @@ func installFail2ban(logWriter io.Writer) error {
 	return nil
 }
 
-func installLocalCaddy(logWriter io.Writer) error {
-	sudo := privilegedCmdPrefix()
-	switch pkgManager() {
-	case "dnf", "yum":
-		pm := pkgManager()
-		steps := [][]string{
-			append(sudo, "bash", "-c", `curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --batch --yes --no-tty -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg`),
-			append(sudo, "bash", "-c", `curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/config.rpm.txt' | tee /etc/yum.repos.d/caddy-stable.repo`),
-			append(sudo, pm, "install", "-y", "caddy-"+build.CaddyVersion),
-		}
-		for _, args := range steps {
-			if err := runLocalCmd(logWriter, args[0], args[1:]...); err != nil {
-				return err
-			}
-		}
-	default: // apt
-		steps := [][]string{
-			append(sudo, "apt-get", "update", "-y"),
-			append(sudo, "apt-get", "install", "-y", "debian-keyring", "debian-archive-keyring", "apt-transport-https", "curl"),
-			append(sudo, "bash", "-c", `curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --batch --yes --no-tty -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg`),
-			append(sudo, "bash", "-c", `curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list`),
-			append(sudo, "apt-get", "update", "-y"),
-			append(sudo, "apt-get", "install", "-y", "caddy="+build.CaddyVersion),
-		}
-		for _, args := range steps {
-			if err := runLocalCmd(logWriter, args[0], args[1:]...); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func installLocalRathole(logWriter io.Writer) error {
-	var archTag string
-	switch runtime.GOARCH {
-	case "arm64":
-		archTag = "aarch64-unknown-linux-musl"
-	default:
-		archTag = "x86_64-unknown-linux-gnu"
-	}
-	url := fmt.Sprintf(
-		"https://github.com/%s/releases/download/%s/rathole-%s.zip",
-		build.RatholeRepo, build.RatholeVersion, archTag,
-	)
-
-	// Ensure unzip is available before attempting to extract.
-	if !isCommandAvailable("unzip") {
-		pm := pkgManager()
-		fmt.Fprintf(logWriter, "  unzip not found, installing via %s...\n", pm)
-		pkgSudo := privilegedCmdPrefix()
-		var installCmd []string
-		switch pm {
-		case "dnf", "yum":
-			installCmd = append(pkgSudo, pm, "install", "-y", "-q", "unzip")
-		default: // apt
-			update := append(pkgSudo, "apt-get", "update", "-qq")
-			if err := runLocalCmd(logWriter, update[0], update[1:]...); err != nil {
-				return fmt.Errorf("failed to run apt-get update: %w", err)
-			}
-			installCmd = append(pkgSudo, "apt-get", "install", "-y", "-qq", "unzip")
-		}
-		if err := runLocalCmd(logWriter, installCmd[0], installCmd[1:]...); err != nil {
-			return fmt.Errorf("failed to install unzip: %w", err)
-		}
-	}
-
-	sudo := privilegedCmdPrefix()
-	steps := [][]string{
-		{"curl", "-fsSL", url, "-o", "/tmp/rathole.zip"},
-		{"unzip", "-q", "-o", "/tmp/rathole.zip", "-d", "/tmp/rathole-dl"},
-		append(sudo, "mv", "/tmp/rathole-dl/rathole", "/usr/local/bin/rathole"),
-		append(sudo, "chmod", "+x", "/usr/local/bin/rathole"),
-		{"rm", "-rf", "/tmp/rathole.zip", "/tmp/rathole-dl"},
-	}
-	for _, args := range steps {
-		if err := runLocalCmd(logWriter, args[0], args[1:]...); err != nil {
-			return err
-		}
-	}
-	return nil
-}
