@@ -953,7 +953,7 @@ func (s *LocalSetupService) reconcileAllTunnelCaddyBlocks(settings *db.AppSettin
 		reloaded = true
 	}
 	if reloaded {
-		if err := systemctlReload("caddy"); err != nil {
+		if err := caddyReload(); err != nil {
 			log.Printf("reconcile all tunnel caddy: caddy reload failed: %v", err)
 		}
 	}

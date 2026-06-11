@@ -99,13 +99,10 @@ func (s *LocalSetupService) ReconcileServerConfig() error {
 		return fmt.Errorf("failed to write %s: %w", configPath, err)
 	}
 
-	// systemctl start is a no-op on an active unit; covers the "not
-	// running" case without forcing a restart on healthy ones. Logged
-	// (not propagated) because the on-disk config IS updated — only the
-	// runtime kick failed, and the next reconcile cycle picks it up.
-	if err := systemctlStart("rathole-server"); err != nil {
-		log.Printf("rathole-server start (post-reconcile) failed: %v", err)
-	}
+	// No restart/start kick: rathole hot-reloads the rewritten server.toml in
+	// place via its inotify notify watcher, and liveness is owned by gopher's
+	// supervisor (which restarts it if it ever exits). We never restart rathole —
+	// that would drop every live tunnel.
 	return nil
 }
 
@@ -195,7 +192,7 @@ func (s *LocalSetupService) AddServiceTunnel(tunnel *db.Tunnel, machine *db.Mach
 		// custom-config block fails here and the new tunnel never routes.
 		// Propagate so the API returns the failure rather than reporting
 		// success while the subdomain 502s.
-		if err := systemctlReload("caddy"); err != nil {
+		if err := caddyReload(); err != nil {
 			return fmt.Errorf("caddy reload failed: %w", err)
 		}
 	}
@@ -359,7 +356,7 @@ func (s *LocalSetupService) RemoveServiceTunnelCaddy(tunnel *db.Tunnel) error {
 			log.Printf("sudo rm of caddy file %s failed: %v", managedPath, err)
 		}
 	}
-	if err := systemctlReload("caddy"); err != nil {
+	if err := caddyReload(); err != nil {
 		log.Printf("caddy reload (post tunnel-remove) failed: %v", err)
 	}
 	return nil
@@ -383,7 +380,7 @@ func (s *LocalSetupService) WriteServiceTunnelCaddy(tunnel *db.Tunnel) error {
 	if err := writeLocalFile(managedPath, block); err != nil {
 		return fmt.Errorf("write caddy block for %s: %w", tunnel.ID, err)
 	}
-	if err := systemctlReload("caddy"); err != nil {
+	if err := caddyReload(); err != nil {
 		return fmt.Errorf("caddy reload failed: %w", err)
 	}
 	return nil
