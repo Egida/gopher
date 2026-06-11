@@ -5,9 +5,10 @@
 //
 // Extraction is version-gated: a binary is (re)written only when it's missing or
 // its recorded version differs from the embedded one, so ordinary restarts do no
-// disk writes. The real payload lives behind the `embedbins` build tag (see
-// payload_embed.go), populated by scripts/fetch-deps.sh; plain `go build`/`go
-// test` use the stub (payload_stub.go) and need no binaries present.
+// disk writes. The payload (payload.go) is embedded from internal/embedbin/bin/,
+// populated by scripts/fetch-deps.sh before a release build; a committed
+// bin/.gitkeep lets plain `go build`/`go test` work with no binaries present
+// (Embedded() then reports false), matching the cmd/server/agents.go convention.
 package embedbin
 
 import (

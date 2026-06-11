@@ -1,5 +1,3 @@
-//go:build embedbins
-
 package embedbin
 
 import (
@@ -11,15 +9,14 @@ import (
 )
 
 // Proves the full chain with the REAL embedded binaries: embed -> extract ->
-// runnable executable of the right arch. Only runs under `-tags embedbins`
-// after scripts/fetch-deps.sh has populated internal/embedbin/bin/.
+// runnable executable of the right arch. Skips unless scripts/fetch-deps.sh has
+// populated internal/embedbin/bin/ (i.e. a release/deploy build).
 func TestRunBundle_ExtractsRunnableBinaries(t *testing.T) {
-	dir := t.TempDir()
-	bins := RunBundle()
-	if len(bins) == 0 {
-		t.Fatal("RunBundle empty under embedbins build")
+	if !Embedded() {
+		t.Skip("binaries not fetched; run scripts/fetch-deps.sh")
 	}
-	if err := ExtractAll(dir, bins); err != nil {
+	dir := t.TempDir()
+	if err := ExtractAll(dir, RunBundle()); err != nil {
 		t.Fatalf("ExtractAll: %v", err)
 	}
 
@@ -32,9 +29,9 @@ func TestRunBundle_ExtractsRunnableBinaries(t *testing.T) {
 		t.Fatalf("caddy version = %q, want it to contain %q", out, build.CaddyVersion)
 	}
 
-	// rathole: just prove the extracted file is a runnable executable of this
-	// arch. A non-zero exit (ExitError) still means it executed; only an
-	// exec/format error means a wrong-arch or corrupt binary.
+	// rathole: prove the extracted file is a runnable executable of this arch.
+	// A non-zero exit (ExitError) still means it executed; only an exec/format
+	// error means a wrong-arch or corrupt binary.
 	if err := exec.Command(dir+"/rathole", "--help").Run(); err != nil {
 		if _, ok := err.(*exec.ExitError); !ok {
 			t.Fatalf("extracted rathole is not a runnable executable: %v", err)
@@ -43,6 +40,9 @@ func TestRunBundle_ExtractsRunnableBinaries(t *testing.T) {
 }
 
 func TestRatholeForOrigin_AllArches(t *testing.T) {
+	if !Embedded() {
+		t.Skip("binaries not fetched; run scripts/fetch-deps.sh")
+	}
 	for _, uname := range []string{"x86_64", "aarch64", "armv7l"} {
 		if data, ok := RatholeForOrigin(uname); !ok || len(data) == 0 {
 			t.Errorf("RatholeForOrigin(%q): ok=%v len=%d, want servable bytes", uname, ok, len(data))

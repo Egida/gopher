@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fetches the external binaries Gopher embeds, into internal/embedbin/bin/
-# (gitignored). MUST run before `go build -tags embedbins`. Versions are read
+# (gitignored). Run before a release/deploy `go build` so go:embed picks up the
+# real binaries (dev builds work without it — see internal/embedbin). Versions are read
 # from internal/build/versions.go so this stays in sync with the Go source of
 # truth.
 #

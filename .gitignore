@@ -35,5 +35,7 @@ coverage.out
 # Temporary files
 /tmp/
 
-# Fetched embedded binaries (populated by scripts/fetch-deps.sh, see embedbins build tag)
-internal/embedbin/bin/
+# Fetched embedded binaries (populated by scripts/fetch-deps.sh, embedded via go:embed).
+# .gitkeep is kept so the directory survives for go:embed on fresh checkouts.
+internal/embedbin/bin/caddy
+internal/embedbin/bin/rathole-*
