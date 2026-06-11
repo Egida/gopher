@@ -193,6 +193,9 @@ func runServer(args []string) {
 	// /static/ goes through the chi router (bootstrap.sh, etc.). ServeMux uses
 	// longest-prefix match, so the agents handler wins for that subtree.
 	mux.Handle("/static/agents/", http.StripPrefix("/static/agents/", agentsHandler()))
+	// /static/rathole/<uname> serves the bundled rathole binary to bootstrapping
+	// origins (embedded builds only); falls through to 404 otherwise.
+	mux.Handle("/static/rathole/", http.StripPrefix("/static/rathole/", ratholeHandler()))
 	mux.Handle("/static/", router)
 	// Top-level liveness probe. Lives outside the chi /api group so external
 	// monitors can hit a stable canonical path without auth. ServeMux's
