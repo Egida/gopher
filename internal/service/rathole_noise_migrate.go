@@ -10,9 +10,10 @@ import (
 
 	"github.com/smalex-z/gopher/internal/config"
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
-const ratholeServerTomlPath = "/etc/rathole/server.toml"
+const ratholeServerTomlPath = paths.RatholeConfig
 
 // detectCustomRatholeServices reads the rathole server config and returns the
 // names of [server.services.X] sections inside the BEGIN/END CUSTOM

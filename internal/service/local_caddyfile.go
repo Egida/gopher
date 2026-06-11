@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 const (
-	caddyConfigPath      = "/etc/caddy/Caddyfile"
-	caddyManagedDir      = "/etc/caddy/conf.d"
+	caddyConfigPath      = paths.CaddyfilePath
+	caddyManagedDir      = paths.CaddyConfDir
 	caddyCustomBeginMark = "# ===== BEGIN CUSTOM CONFIGURATION ====="
 	caddyCustomEndMark   = "# ===== END CUSTOM CONFIGURATION ====="
 )
@@ -159,7 +160,7 @@ func buildManagedCaddyfile(existing, bindIP string) string {
 		out.WriteString("#     email you@example.com\n")
 		out.WriteString("# }\n\n")
 	}
-	out.WriteString("import /etc/caddy/conf.d/*.caddy\n\n")
+	out.WriteString("import " + paths.CaddyConfDir + "/*.caddy\n\n")
 	out.WriteString(caddyCustomBeginMark + "\n")
 	for _, h := range caddyCustomHeaderLines {
 		out.WriteString(h + "\n")

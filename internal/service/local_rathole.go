@@ -10,6 +10,7 @@ import (
 
 	"github.com/smalex-z/gopher/internal/config"
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/paths"
 	sshpkg "github.com/smalex-z/gopher/internal/ssh"
 )
 
@@ -24,7 +25,7 @@ func (s *LocalSetupService) AddMachineSSHTunnel(machine *db.Machine) error {
 // ABOVE the custom section. The custom section is user-owned and never
 // overwritten — it is the right place for pre-existing or user-added services.
 func (s *LocalSetupService) ReconcileServerConfig() error {
-	const configPath = "/etc/rathole/server.toml"
+	const configPath = paths.RatholeConfig
 	const beginMarker = "# ===== BEGIN CUSTOM CONFIGURATION ====="
 	const endMarker = "# ===== END CUSTOM CONFIGURATION ====="
 
