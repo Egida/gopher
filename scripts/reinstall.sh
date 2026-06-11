@@ -32,6 +32,18 @@ fi
 sudo install -d -m 0700 -o "$JUMPBOX_USER" -g "$JUMPBOX_USER" "$JUMPBOX_HOME/.ssh"
 echo "✓ Jumpbox user ready"
 
+# Ensure gopher.service opts into supervising the bundled caddy/rathole. This is
+# the upgrade path for existing installs whose unit predates the embedded model;
+# without GOPHER_MANAGED the new binary stays inert (no supervision/migration).
+echo "→ Ensuring gopher.service has GOPHER_MANAGED..."
+UNIT="/etc/systemd/system/$SERVICE.service"
+if [ -f "$UNIT" ] && ! sudo grep -q "GOPHER_MANAGED=1" "$UNIT"; then
+  sudo sed -i '/^\[Service\]/a Environment=GOPHER_MANAGED=1' "$UNIT"
+  echo "  Added Environment=GOPHER_MANAGED=1 to $UNIT"
+else
+  echo "✓ GOPHER_MANAGED already set (or unit absent)"
+fi
+
 echo "→ Reloading systemd units..."
 sudo systemctl daemon-reload
 

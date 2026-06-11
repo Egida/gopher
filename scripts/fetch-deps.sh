@@ -28,6 +28,17 @@ case "$GOARCH" in
   *) echo "fetch-deps: unsupported edge GOARCH=$GOARCH (edges are amd64 or arm64)" >&2; exit 1 ;;
 esac
 
+# Idempotent: skip the downloads when the staged binaries already match the
+# pinned versions + arch (so build.sh/reinstall.sh don't refetch ~40MB every
+# build). A version bump in versions.go changes the stamp and forces a refetch.
+STAMP="$BIN/.versions"
+WANT="caddy=${CADDY_VERSION}/${CADDY_ARCH} rathole=${RATHOLE_VERSION}"
+if [ -f "$BIN/caddy" ] && [ -f "$BIN/rathole-x86_64" ] && [ -f "$BIN/rathole-aarch64" ] && \
+   [ -f "$BIN/rathole-armv7" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$WANT" ]; then
+  echo "fetch-deps: caddy ${CADDY_VERSION} + rathole ${RATHOLE_VERSION} already staged — skipping"
+  exit 0
+fi
+
 echo "Fetching caddy ${CADDY_VERSION} (linux/${CADDY_ARCH})..."
 curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_${CADDY_ARCH}.tar.gz" \
   | tar -xz -C "$BIN" caddy
@@ -47,4 +58,5 @@ fetch_rathole "x86_64-unknown-linux-gnu"       "rathole-x86_64"
 fetch_rathole "aarch64-unknown-linux-musl"     "rathole-aarch64"
 fetch_rathole "armv7-unknown-linux-musleabihf" "rathole-armv7"
 
+echo "$WANT" > "$STAMP"
 echo "Done. Embedded binaries staged in $BIN"
