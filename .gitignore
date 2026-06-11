@@ -34,3 +34,6 @@ coverage.out
 
 # Temporary files
 /tmp/
+
+# Fetched embedded binaries (populated by scripts/fetch-deps.sh, see embedbins build tag)
+internal/embedbin/bin/
