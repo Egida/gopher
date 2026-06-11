@@ -228,6 +228,15 @@ func runServer(args []string) {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	// Bring up bundled caddy/rathole under gopher's own supervisor, if this is
+	// an embedded build whose consolidated config is in place. Returns nil
+	// (no-op) for dev/legacy builds where systemd still manages them — see
+	// startBundledChildren for the safety interlocks.
+	sup, supErr := startBundledChildren()
+	if supErr != nil {
+		log.Printf("Warning: bundled child startup failed: %v", supErr)
+	}
+
 	// Run the server in a goroutine so the main thread can wait on signals
 	// and trigger a graceful drain. Without this, SIGTERM (sent by
 	// `systemctl stop gopher` and the upgrade flow) would kill in-flight
@@ -249,6 +258,14 @@ func runServer(args []string) {
 		log.Fatalf("Server failed: %v", err)
 	case sig := <-sigCh:
 		log.Printf("received %s, draining...", sig)
+	}
+
+	// Stop supervised children first. Under systemd's default control-group
+	// KillMode, caddy/rathole receive SIGTERM directly at the same instant as
+	// gopher; stopping the supervisor now cancels its restart loops so it
+	// doesn't try to respawn a child that systemd is tearing down.
+	if sup != nil {
+		sup.Stop()
 	}
 
 	// Give in-flight HTTP requests up to 25s to drain (systemd's default
