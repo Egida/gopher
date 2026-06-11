@@ -53,6 +53,11 @@ sudo systemctl stop "$SERVICE"
 echo "→ Replacing binary at $INSTALL_BIN..."
 sudo cp "$ROOT/gopher" "$INSTALL_BIN"
 
+# The supervisor extracts the bundled caddy/rathole here at startup; gopher runs
+# as the unprivileged 'gopher' user, so the dir must be gopher-owned.
+echo "→ Ensuring /opt/gopher/bin is writable by gopher..."
+sudo install -d -o gopher -g gopher -m 0755 /opt/gopher/bin
+
 echo "→ Starting $SERVICE service..."
 sudo systemctl start "$SERVICE"
 

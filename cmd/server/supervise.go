@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -31,17 +30,25 @@ import (
 // the cap is granted on the extracted binary via setcap — no unit change or
 // self-restart needed (requires NoNewPrivileges unset on gopher.service, which
 // it is).
+// migrateEdgeLayoutIfManaged runs the legacy -> /etc/gopher migration on a
+// managed, embedded edge. It MUST be called before the boot-time reconcile so
+// the reconcile reads the migrated config (preserving the user's custom blocks)
+// rather than an empty tree, and so Caddy's certs are in place before the
+// supervised Caddy starts. Idempotent (marker-gated inside the service).
+func migrateEdgeLayoutIfManaged() {
+	if os.Getenv("GOPHER_MANAGED") != "1" || !embedbin.Embedded() {
+		return
+	}
+	if migrated, err := service.MigrateEdgeLayout(os.Stdout); err != nil {
+		log.Printf("edge layout migration: %v", err)
+	} else if migrated {
+		log.Printf("migrated legacy edge layout to %s", paths.ConfigDir)
+	}
+}
+
 func startBundledChildren() (*supervisor.Supervisor, error) {
 	if os.Getenv("GOPHER_MANAGED") != "1" || !embedbin.Embedded() {
 		return nil, nil
-	}
-
-	// Move a legacy install onto the /etc/gopher layout. Idempotent; no-op on a
-	// fresh or already-migrated edge.
-	if migrated, err := service.MigrateEdgeLayout(os.Stdout); err != nil {
-		return nil, fmt.Errorf("edge layout migration: %w", err)
-	} else if migrated {
-		log.Printf("supervisor: migrated legacy edge layout to %s", paths.ConfigDir)
 	}
 
 	if _, err := os.Stat(paths.RatholeConfig); err != nil {

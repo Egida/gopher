@@ -34,15 +34,19 @@ import (
 // on a throwaway VPS — confirming certs survive (no re-issue) and existing
 // clients reconnect — before this path runs on a production edge.
 func MigrateEdgeLayout(w io.Writer) (migrated bool, err error) {
-	// Already on the new layout?
-	if _, statErr := os.Stat(paths.RatholeConfig); statErr == nil {
+	// Gate on a dedicated marker, NOT on server.toml — the boot reconcile creates
+	// server.toml, so keying off it would make us skip the cert-move + service
+	// stop (the bug the first cutover hit).
+	marker := paths.StateDir + "/.edge-migrated"
+	if _, statErr := os.Stat(marker); statErr == nil {
 		return false, nil
 	}
 	// Nothing legacy to migrate => fresh install; the install flow builds
-	// /etc/gopher directly.
+	// /etc/gopher directly. Mark it handled so we don't re-check every boot.
 	_, ratholeErr := os.Stat(paths.LegacyRatholeConfig)
 	_, caddyErr := os.Stat(paths.LegacyCaddyfile)
 	if ratholeErr != nil && caddyErr != nil {
+		_ = os.WriteFile(marker, []byte("fresh\n"), 0o644)
 		return false, nil
 	}
 
@@ -100,6 +104,11 @@ func MigrateEdgeLayout(w io.Writer) (migrated bool, err error) {
 		if wErr := writeLocalFile(paths.CaddyfilePath, buildManagedCaddyfile(string(existing), bindIP)); wErr != nil {
 			return false, fmt.Errorf("migrate: rewrite Caddyfile import path: %w", wErr)
 		}
+	}
+
+	// Mark migration done so subsequent boots skip it (idempotent).
+	if wErr := os.WriteFile(marker, []byte("migrated\n"), 0o644); wErr != nil {
+		fmt.Fprintf(w, "  warning: could not write migration marker %s: %v\n", marker, wErr)
 	}
 
 	fmt.Fprintf(w, "Edge layout migration complete (legacy trees left in place for rollback).\n")
