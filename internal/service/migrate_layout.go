@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/smalex-z/gopher/internal/db"
 	"github.com/smalex-z/gopher/internal/paths"
 )
 
@@ -87,6 +88,19 @@ func MigrateEdgeLayout(w io.Writer) (migrated bool, err error) {
 	//    as gopher and must read/write them; legacy caddy data was caddy:caddy).
 	_ = runLocalCmd(w, "sudo", "-n", "chown", "-R", "gopher:gopher", paths.ConfigDir)
 	_ = runLocalCmd(w, "sudo", "-n", "chown", "-R", "gopher:gopher", paths.CaddyData)
+
+	// 6. The copied Caddyfile still imports /etc/caddy/conf.d; rebuild it so the
+	//    import points at the new conf.d (paths.CaddyConfDir) while preserving the
+	//    user's custom block. The supervised caddy reads this file.
+	if existing, e := os.ReadFile(paths.CaddyfilePath); e == nil {
+		bindIP := ""
+		if s, _ := db.GetSettings(); s != nil {
+			bindIP = s.BindIP
+		}
+		if wErr := writeLocalFile(paths.CaddyfilePath, buildManagedCaddyfile(string(existing), bindIP)); wErr != nil {
+			return false, fmt.Errorf("migrate: rewrite Caddyfile import path: %w", wErr)
+		}
+	}
 
 	fmt.Fprintf(w, "Edge layout migration complete (legacy trees left in place for rollback).\n")
 	return true, nil
