@@ -2,43 +2,48 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
+	"os/exec"
 
 	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/embedbin"
 	"github.com/smalex-z/gopher/internal/paths"
+	"github.com/smalex-z/gopher/internal/service"
 	"github.com/smalex-z/gopher/internal/supervisor"
 )
 
-// startBundledChildren extracts the embedded caddy/rathole to paths.BinDir and
-// brings them up under a supervisor that gopher owns. It returns (nil, nil) —
-// meaning "not supervising" — in the cases where caddy/rathole are still managed
-// externally (systemd), so the caller treats a nil supervisor as a no-op.
+// startBundledChildren extracts the embedded caddy/rathole and brings them up
+// under a supervisor that gopher owns. It returns (nil, nil) — "not
+// supervising" — unless ALL of the following hold, so it's safe to compile in
+// and to run tests against a live edge:
 //
-// Two interlocks keep this safe to deploy before the rest of the migration
-// lands:
+//  1. GOPHER_MANAGED=1 — set only by the systemd unit (see install.go). `go
+//     test`, `go run`, and stray executions don't set it, so they never run the
+//     DESTRUCTIVE legacy migration or fight a live edge's services.
+//  2. Embedded() — real binaries were compiled in (not a dev/IDE build).
+//  3. The consolidated /etc/gopher config exists — created by the migration
+//     below or a fresh install; until then there's nothing valid to run, so we
+//     leave caddy/rathole to their current manager.
 //
-//  1. !Embedded(): a dev/legacy build (no fetched binaries) never supervises —
-//     behaviour is identical to today, caddy/rathole stay under systemd.
-//  2. No consolidated config yet: even an embedded build won't start its own
-//     caddy/rathole until /etc/gopher has been populated by migration. Until
-//     then the legacy systemd-managed caddy.service/rathole-server.service are
-//     serving, and starting our own children would fight them for ports 80/443
-//     and the rathole control port.
-//
-// PREREQUISITE for the switch (leg 4): gopher.service must run with
-// AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN — gopher runs as the
-// unprivileged `gopher` user, and the supervised caddy inherits gopher's ambient
-// capability set; without it caddy cannot bind 80/443. rathole binds only high
-// ports and needs no caps. Migration must also stop+disable the legacy
-// caddy.service/rathole-server.service and preserve data (the DB stays in
-// /var/lib/gopher; Caddy's certs move from /var/lib/caddy to /var/lib/gopher/caddy
-// so they are NOT re-issued).
+// caddy must bind 80/443; gopher runs unprivileged and spawns it as a child, so
+// the cap is granted on the extracted binary via setcap — no unit change or
+// self-restart needed (requires NoNewPrivileges unset on gopher.service, which
+// it is).
 func startBundledChildren() (*supervisor.Supervisor, error) {
-	if !embedbin.Embedded() {
+	if os.Getenv("GOPHER_MANAGED") != "1" || !embedbin.Embedded() {
 		return nil, nil
 	}
+
+	// Move a legacy install onto the /etc/gopher layout. Idempotent; no-op on a
+	// fresh or already-migrated edge.
+	if migrated, err := service.MigrateEdgeLayout(os.Stdout); err != nil {
+		return nil, fmt.Errorf("edge layout migration: %w", err)
+	} else if migrated {
+		log.Printf("supervisor: migrated legacy edge layout to %s", paths.ConfigDir)
+	}
+
 	if _, err := os.Stat(paths.RatholeConfig); err != nil {
 		log.Printf("supervisor: %s not present yet — leaving caddy/rathole to their current manager", paths.RatholeConfig)
 		return nil, nil
@@ -47,21 +52,25 @@ func startBundledChildren() (*supervisor.Supervisor, error) {
 	if err := embedbin.ExtractAll(paths.BinDir, embedbin.RunBundle()); err != nil {
 		return nil, err
 	}
+	// File capability so the unprivileged, gopher-spawned caddy can bind 80/443.
+	// Re-applied each start because extraction (temp + rename) drops file caps.
+	if out, err := exec.Command("sudo", "-n", "setcap", "cap_net_bind_service=+ep", paths.CaddyBin).CombinedOutput(); err != nil { // #nosec G204 — fixed args
+		log.Printf("supervisor: setcap on %s failed (caddy may not bind 80/443): %v: %s", paths.CaddyBin, err, out)
+	}
 
 	sup := supervisor.New(os.Stdout,
 		supervisor.Spec{
 			Name: "caddy",
 			Path: paths.CaddyBin,
 			Args: []string{"run", "--config", paths.CaddyfilePath, "--adapter", "caddyfile"},
-			// Caddy stores its ACME certs/data under $XDG_DATA_HOME/caddy, so this
-			// keeps them in /var/lib/gopher/caddy (= paths.CaddyData).
+			// Caddy stores ACME certs/data under $XDG_DATA_HOME/caddy, keeping
+			// them in /var/lib/gopher/caddy (= paths.CaddyData).
 			Env: []string{"XDG_DATA_HOME=" + paths.StateDir},
 		},
 		supervisor.Spec{
 			Name: "rathole",
 			Path: paths.RatholeBin,
-			// rathole auto-detects server mode from the [server] config block.
-			Args: []string{paths.RatholeConfig},
+			Args: []string{paths.RatholeConfig}, // server mode auto-detected from [server] config
 		},
 	)
 	log.Printf("supervisor: starting bundled caddy %s + rathole %s as children", build.CaddyVersion, build.RatholeVersion)

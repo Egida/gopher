@@ -2,17 +2,19 @@ package main
 
 import "testing"
 
-// In a default (non-embedded) test build, no binaries are compiled in, so
-// startBundledChildren must be a safe no-op: nil supervisor, nil error, and
-// crucially it must NOT spawn anything that would collide with the
-// systemd-managed caddy/rathole on a live edge. This guards the "deploying the
-// wiring changes nothing until we opt into embedding" property.
-func TestStartBundledChildren_NoopWhenNotEmbedded(t *testing.T) {
+// Tests never set GOPHER_MANAGED, so startBundledChildren must be completely
+// inert: nil supervisor, nil error, and — crucially — it must NOT run the
+// destructive legacy-layout migration or spawn caddy/rathole, even on a dev box
+// that has embedded binaries AND a live legacy install. This guards against a
+// test run stopping a real edge's services.
+func TestStartBundledChildren_InertWithoutManagedEnv(t *testing.T) {
+	t.Setenv("GOPHER_MANAGED", "") // explicitly not a managed edge
+
 	sup, err := startBundledChildren()
 	if err != nil {
 		t.Fatalf("startBundledChildren err = %v, want nil", err)
 	}
 	if sup != nil {
-		t.Fatal("startBundledChildren returned a supervisor in a non-embedded build; must be a no-op")
+		t.Fatal("returned a supervisor without GOPHER_MANAGED=1; must be inert in tests")
 	}
 }

@@ -365,6 +365,10 @@ After=network.target
 [Service]
 Type=simple
 User=%s
+# Marks this as a real managed edge: gopher only extracts/supervises the bundled
+# caddy+rathole (and runs the destructive legacy-layout migration) when this is
+# set, so test/dev/stray executions never touch a live edge.
+Environment=GOPHER_MANAGED=1
 ExecStart=%s --db %s
 Restart=always
 RestartSec=5
