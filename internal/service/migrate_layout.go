@@ -52,11 +52,25 @@ func MigrateEdgeLayout(w io.Writer) (migrated bool, err error) {
 
 	fmt.Fprintf(w, "Migrating edge to the consolidated %s layout...\n", paths.ConfigDir)
 
-	// 1. Stop + disable the legacy services so they release their ports and
-	//    don't auto-start. Best-effort — a unit that isn't installed is fine.
-	for _, unit := range []string{"caddy", "rathole-server"} {
+	// 1. Neutralize the legacy services so they release their ports and can NEVER
+	//    respawn. plain `disable --now` is NOT enough: legacy installs shipped the
+	//    rathole unit under more than one name (rathole.service AND
+	//    rathole-server.service), and Restart=always + a detached (PPID 1) rathole
+	//    process keeps respawning and re-grabbing the ports. So: disable+stop every
+	//    known legacy unit, REMOVE the rathole unit files (they live in
+	//    /etc/systemd/system), MASK the apt caddy unit (file in /usr/lib, can't be
+	//    removed), reload, then kill any orphaned legacy rathole still holding a
+	//    port. The supervised rathole isn't started until after migration, so
+	//    killing by exact process name here is safe.
+	for _, unit := range []string{"rathole", "rathole-server", "caddy-api", "caddy"} {
 		_ = runLocalCmd(w, "sudo", "-n", "systemctl", "disable", "--now", unit)
 	}
+	for _, f := range []string{"/etc/systemd/system/rathole.service", "/etc/systemd/system/rathole-server.service"} {
+		_ = runLocalCmd(w, "sudo", "-n", "rm", "-f", f)
+	}
+	_ = runLocalCmd(w, "sudo", "-n", "systemctl", "mask", "caddy")
+	_ = runLocalCmd(w, "sudo", "-n", "systemctl", "daemon-reload")
+	_ = runLocalCmd(w, "sudo", "-n", "pkill", "-x", "rathole")
 
 	// 2. Create the new trees.
 	for _, dir := range []string{paths.ConfigDir + "/rathole", paths.CaddyConfDir, paths.CaddyData} {
