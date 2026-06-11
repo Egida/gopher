@@ -57,7 +57,12 @@ const (
 const (
 	LegacyRatholeConfig = "/etc/rathole/server.toml"
 	LegacyRatholeBin    = "/usr/local/bin/rathole"
-	LegacyCaddyfile     = "/etc/caddy/Caddyfile"
-	LegacyCaddyConfDir  = "/etc/caddy/conf.d"
-	LegacyCaddyData     = "/var/lib/caddy"
+	LegacyCaddyfile    = "/etc/caddy/Caddyfile"
+	LegacyCaddyConfDir = "/etc/caddy/conf.d"
+	// LegacyCaddyData is the apt Caddy's actual data root. That Caddy runs as
+	// User=caddy with HOME=/var/lib/caddy and uses $HOME/.local/share/caddy (NOT
+	// XDG_DATA_HOME), so the certs live one level deep. The supervised Caddy uses
+	// XDG_DATA_HOME=/var/lib/gopher -> /var/lib/gopher/caddy (= CaddyData), so
+	// migration copies this dir's contents there.
+	LegacyCaddyData = "/var/lib/caddy/.local/share/caddy"
 )
