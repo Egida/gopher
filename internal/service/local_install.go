@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/embedbin"
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 // pkgManager detects the system package manager. Returns "apt", "dnf", or "yum".
@@ -125,30 +129,15 @@ func (s *LocalSetupService) Skip(domain string) error {
 func (s *LocalSetupService) doInstall(domain, serverHost string, skipCaddy bool, logWriter io.Writer) error {
 	fmt.Fprintln(logWriter, "=== Installing Local Services ===")
 
-	// Step 1: Caddy (optional)
-	if skipCaddy {
-		fmt.Fprintln(logWriter, "Step 1: Skipping Caddy setup (reverse proxy disabled)")
+	// Steps 1-2: caddy + rathole are bundled into the gopher binary and extracted
+	// to /opt/gopher/bin by the supervisor at startup — no apt install, no
+	// download. (A non-embedded dev build has no binaries to run; it can still
+	// write config but you'd run caddy/rathole yourself.)
+	if embedbin.Embedded() {
+		fmt.Fprintln(logWriter, "Steps 1-2: caddy + rathole are bundled (embedded build) — no system install ✓")
 	} else {
-		if !isCommandAvailable("caddy") {
-			fmt.Fprintf(logWriter, "Step 1: Installing Caddy via %s...\n", pkgManager())
-			if err := installLocalCaddy(logWriter); err != nil {
-				return fmt.Errorf("failed to install Caddy: %w", err)
-			}
-		} else {
-			fmt.Fprintln(logWriter, "Step 1: Caddy already installed ✓")
-		}
+		fmt.Fprintln(logWriter, "Steps 1-2: WARNING — non-embedded build; caddy/rathole are not bundled. Config will be written but they won't be supervised.")
 	}
-
-	// Step 2: Rathole — always ensure fresh binary and config
-	fmt.Fprintln(logWriter, "Step 2: Ensuring rathole binary...")
-	if err := installLocalRathole(logWriter); err != nil {
-		return fmt.Errorf("failed to install rathole: %w", err)
-	}
-	ratholeExePath := findCommandPath("rathole")
-	if ratholeExePath == "" {
-		return fmt.Errorf("rathole binary not found after installation")
-	}
-	fmt.Fprintf(logWriter, "  Rathole ready at %s ✓\n", ratholeExePath)
 
 	// Step 3: Caddyfile — import-based layout + managed conf.d entries
 	if skipCaddy {
@@ -190,60 +179,29 @@ func (s *LocalSetupService) doInstall(domain, serverHost string, skipCaddy bool,
 	}
 
 	// Step 4: Rathole server.toml — migrate existing if present, create fresh if not
-	fmt.Fprintln(logWriter, "Step 4: Setting up /etc/rathole/server.toml...")
-	if err := sudoMkdir("/etc/rathole"); err != nil {
+	fmt.Fprintf(logWriter, "Step 4: Setting up %s...\n", paths.RatholeConfig)
+	if err := sudoMkdir(paths.ConfigDir + "/rathole"); err != nil {
 		return err
 	}
-	if _, statErr := os.Stat("/etc/rathole/server.toml"); os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(paths.RatholeConfig); os.IsNotExist(statErr) {
 		if existingConfig := findExistingRatholeConfig(logWriter); existingConfig != "" {
 			fmt.Fprintln(logWriter, "  Found existing rathole config, migrating with custom section markers...")
-			if err := writeLocalFile("/etc/rathole/server.toml", migrateRatholeConfig(existingConfig)); err != nil {
+			if err := writeLocalFile(paths.RatholeConfig, migrateRatholeConfig(existingConfig)); err != nil {
 				return fmt.Errorf("failed to write rathole config: %w", err)
 			}
 		} else {
-			if err := writeLocalFile("/etc/rathole/server.toml", ratholeServerInitialConfig); err != nil {
+			if err := writeLocalFile(paths.RatholeConfig, ratholeServerInitialConfig); err != nil {
 				return fmt.Errorf("failed to write rathole config: %w", err)
 			}
 		}
 	} else {
-		fmt.Fprintln(logWriter, "  /etc/rathole/server.toml already exists, preserving")
+		fmt.Fprintf(logWriter, "  %s already exists, preserving\n", paths.RatholeConfig)
 	}
 
-	// Step 5: Rathole-server systemd unit (always update to ensure ExecStart path is correct)
-	fmt.Fprintf(logWriter, "Step 5: Writing /etc/systemd/system/rathole-server.service (ExecStart=%s)...\n", ratholeExePath)
-	if err := writeLocalFile("/etc/systemd/system/rathole-server.service", buildRatholeServiceUnit(ratholeExePath)); err != nil {
-		return fmt.Errorf("failed to write rathole service unit: %w", err)
-	}
-
-	// Step 6: Reload systemd
-	fmt.Fprintln(logWriter, "Step 6: Reloading systemd daemon...")
-	if err := runLocalCmd(logWriter, "sudo", "systemctl", "daemon-reload"); err != nil {
-		return err
-	}
-
-	// Step 7: Enable + start Caddy
-	if skipCaddy {
-		fmt.Fprintln(logWriter, "Step 7: Skipping caddy.service enable/start")
-	} else {
-		fmt.Fprintln(logWriter, "Step 7: Enabling and starting caddy.service...")
-		if err := runLocalCmd(logWriter, "sudo", "systemctl", "enable", "--now", "caddy"); err != nil {
-			return err
-		}
-	}
-
-	// Step 8: Enable + start rathole-server
-	fmt.Fprintln(logWriter, "Step 8: Enabling and starting rathole-server.service...")
-	if err := runLocalCmd(logWriter, "sudo", "systemctl", "enable", "--now", "rathole-server"); err != nil {
-		return err
-	}
-
-	// Step 9: Reload Caddy so new Caddyfile takes effect
-	if skipCaddy {
-		fmt.Fprintln(logWriter, "Step 9: Skipping Caddy reload")
-	} else {
-		fmt.Fprintln(logWriter, "Step 9: Reloading Caddy config...")
-		_ = runLocalCmd(logWriter, "sudo", "systemctl", "reload", "caddy")
-	}
+	// Steps 5-9: no separate systemd units and no apt service enable/reload —
+	// gopher.service supervises caddy + rathole as children (see
+	// cmd/server/supervise.go). They come up when gopher (re)starts at the end of
+	// this install with the config we just wrote.
 
 	// Step 10: fail2ban — install and configure (best-effort; non-fatal)
 	fmt.Fprintln(logWriter, "Step 10: Configuring fail2ban...")
@@ -280,6 +238,20 @@ func (s *LocalSetupService) doInstall(domain, serverHost string, skipCaddy bool,
 		fmt.Fprintln(logWriter, "Dashboard: local mode (reverse proxy disabled)")
 	} else {
 		fmt.Fprintf(logWriter, "Dashboard: https://router.%s\n", domain)
+	}
+
+	// Embedded build: kick gopher so the supervisor brings up caddy + rathole
+	// with the config just written (on a fresh edge the supervisor no-op'd at
+	// boot because /etc/gopher didn't exist yet). Delayed so the WebSocket DONE
+	// reaches the dashboard before the restart drops the connection — mirrors
+	// update.go's self-restart pattern. Requires GOPHER_MANAGED=1 on the unit.
+	if embedbin.Embedded() {
+		fmt.Fprintln(logWriter, "Restarting gopher so the supervisor starts caddy + rathole...")
+		go goSafe("postInstallRestart", func() {
+			time.Sleep(2 * time.Second)
+			restart := append(append([]string{}, privilegedCmdPrefix()...), "systemctl", "restart", "gopher")
+			_ = exec.Command(restart[0], restart[1:]...).Run() // #nosec G204 — fixed args
+		})
 	}
 	return nil
 }
