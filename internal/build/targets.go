@@ -20,9 +20,11 @@ type RatholeTarget struct {
 // embedded only for the edge's own arch.
 //
 // armv7 is included so 32-bit ARM origins (Raspberry Pi 2/older, some routers)
-// keep working. Note: the gopher-agent has no armv7 build yet, so armv7 origins
-// are tunnel-only (no agent control channel) until one is added. Mirrors the
-// arch mapping in templates/bootstrap.sh.
+// keep working. All Linux arches are fully managed: the gopher-agent is built
+// for armv7 too (GOARM=7, hard-float — matches rathole's musleabihf ABI), so
+// armv7 origins get the agent like any other Linux box rather than being a
+// tunnel-only second class. (macOS/Windows are the tunnel-only tier, by OS, not
+// by CPU arch.) Mirrors the arch mapping in templates/bootstrap.sh.
 var RatholeTargets = []RatholeTarget{
 	{Name: "x86_64", ReleaseTag: "x86_64-unknown-linux-gnu", Uname: "x86_64"},
 	{Name: "aarch64", ReleaseTag: "aarch64-unknown-linux-musl", Uname: "aarch64"},
