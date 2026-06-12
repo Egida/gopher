@@ -232,6 +232,12 @@ Components managed by Gopher:
 - **rathole** — Secure tunnel client/server
 - **Web UI** — Tunnel and machine management
 
+Caddy and rathole are **bundled into the single `gopher` binary** (`go:embed`) and
+extracted + run as **child processes that Gopher supervises** — no separate apt
+package, no downloads at install, no extra systemd units. The whole edge lives
+under `/etc/gopher` (config) and `/var/lib/gopher` (state + certs): one artifact
+to install, two directories to back up.
+
 Similar to Cloudflare, but:
 
 - ✅ You own the infrastructure
@@ -335,7 +341,7 @@ party ever sits in front of your services.
 |  | Gopher | ngrok | Cloudflare Tunnel | Tailscale Funnel | Port Forwarding |
 |---|--------|-------|-------------------|------------------|-----------------|
 | **Self-hosted** | ✅ | ❌ | ❌ | ❌ | N/A |
-| **Traffic privacy** | ✅ You control | ❌ ngrok sees all | ❌ CF sees all | ❌ Tailscale sees all | ✅ |
+| **No third party reads your traffic** | ✅ Your edge | ❌ ngrok decrypts | ❌ CF decrypts | ✅ Passthrough | ✅ |
 | **Edge request filtering** (bot detection) | ✅ | 💰 Paid | ✅ | ❌ | ❌ |
 | **Multi-region routing** | ✅ | 💰 Paid | ✅ | ⚠️ Limited | ❌ |
 | **Origin IP hidden** | ✅ | ✅ | ✅ | ✅ | ❌ Exposes home IP |
