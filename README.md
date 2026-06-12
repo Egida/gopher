@@ -38,7 +38,7 @@ vault.yourdomain.com  → Bitwarden on Raspberry Pi (behind NAT)
 
 > **📺 Prefer to watch?** [**12-minute video install guide**](https://www.youtube.com/watch?v=KYpr61Ak9FE) — a full walkthrough from VPS to first tunnel.
 
-Gopher ships as a single self-contained binary for Linux. No runtime dependencies — Caddy and rathole are downloaded automatically during setup.
+Gopher ships as a single self-contained binary for Linux. No runtime dependencies — Caddy and rathole are embedded in the binary.
 
 ### Requirements
 
