@@ -341,7 +341,7 @@ party ever sits in front of your services.
 |  | Gopher | ngrok | Cloudflare Tunnel | Tailscale Funnel | Port Forwarding |
 |---|--------|-------|-------------------|------------------|-----------------|
 | **Self-hosted** | ✅ | ❌ | ❌ | ❌ | N/A |
-| **No third party reads your traffic** | ✅ Your edge | ❌ ngrok decrypts | ❌ CF decrypts | ✅ Passthrough | ✅ |
+| **Who can read your requests** | ✅ Only you | ❌ ngrok | ❌ Cloudflare | ✅ Only you | ✅ Only you |
 | **Edge request filtering** (bot detection) | ✅ | 💰 Paid | ✅ | ❌ | ❌ |
 | **Multi-region routing** | ✅ | 💰 Paid | ✅ | ⚠️ Limited | ❌ |
 | **Origin IP hidden** | ✅ | ✅ | ✅ | ✅ | ❌ Exposes home IP |
@@ -351,14 +351,15 @@ party ever sits in front of your services.
 | **Any DNS registrar** | ✅ | ✅ | ❌ Must use CF DNS | ❌ Tailscale subdomain | ✅ |
 | **Permanent URLs** | ✅ | ❌ Ephemeral (free) | ✅ | ✅ | ✅ |
 | **Tunnel count** | ✅ Unlimited | ❌ 1 (free) | ✅ Unlimited | ✅ Unlimited | ✅ Unlimited |
-| **Protocol support** | HTTP / TCP / UDP | HTTP / TCP | HTTP only** | HTTPS only*** | All |
+| **Protocol support** | HTTP / TCP / UDP | HTTP / TCP | HTTP/HTTPS** | HTTPS only*** | All |
 | **Works behind NAT/CGNAT** | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **Automatic HTTPS** | ✅ | ✅ | ✅ | ✅ | ❌ Manual |
 | **No vendor lock-in** | ✅ | ❌ | ❌ | ❌ | ✅ |
 
 \* Free with significant limitations  
-\*\* Non-HTTP requires Cloudflare Spectrum (enterprise pricing)  
-\*\*\* Tailscale Funnel is HTTPS-only on port 443; no TCP/UDP, no raw port exposure
+\*\* Cloudflare Tunnel serves HTTP/HTTPS to anonymous visitors; raw TCP needs Spectrum (Pro+), UDP needs Enterprise  
+\*\*\* Tailscale Funnel is HTTPS-only on port 443; no TCP/UDP, no raw port exposure  
+Cloudflare and ngrok terminate your TLS on their servers, so they can read your requests.
 
 ---
 
