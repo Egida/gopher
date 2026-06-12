@@ -368,36 +368,58 @@ export default function MachinesPage() {
                       <td className="px-4 py-3 text-gray-600">{m.username}</td>
                       <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
                       <td className="px-4 py-3">
-                        {m.agent_installed && !m.agent_outdated ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium text-green-700 bg-green-50 border border-green-200">
-                            <CheckCircle size={11} /> v{m.agent_version || '–'}
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => installAgentMutation.mutate(m.id)}
-                            disabled={installAgentMutation.isPending && installAgentMutation.variables === m.id}
-                            title={
-                              m.agent_outdated
-                                ? `Agent is outdated${m.agent_version ? ` (v${m.agent_version})` : ''} — run the upgrade command on this machine`
-                                : m.agent_install_error
-                                  ? `Last error: ${m.agent_install_error}`
-                                  : 'Install gopher-agent on this machine'
-                            }
-                            className={`px-2 py-1 text-xs rounded border flex items-center gap-1 transition-colors ${
-                              m.agent_install_error
-                                ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
-                                : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                            }`}
-                          >
-                            {installAgentMutation.isPending && installAgentMutation.variables === m.id
-                              ? <><Loader2 size={11} className="animate-spin" /> {m.agent_outdated ? 'Upgrading…' : 'Installing…'}</>
-                              : m.agent_outdated
-                                ? <>Upgrade agent</>
-                                : m.agent_install_error
-                                  ? <>Retry install</>
-                                  : <>Install agent</>}
-                          </button>
-                        )}
+                        {(() => {
+                          // Only offer an actionable install/upgrade when we can VERIFY the
+                          // need right now: no agent at all, or the agent is reachable AND
+                          // reporting outdated (e.g. v0.1.0). When the machine is offline the
+                          // agent_outdated flag can be stale, so we don't trust it — we just
+                          // report the last-known version instead of a bogus "Upgrade agent".
+                          const reachable = m.status === 'connected' || m.status === 'degraded'
+                          const showInstall = !m.agent_installed
+                          const showUpgrade = m.agent_installed && m.agent_outdated && reachable
+                          if (showInstall || showUpgrade) {
+                            return (
+                              <button
+                                onClick={() => installAgentMutation.mutate(m.id)}
+                                disabled={installAgentMutation.isPending && installAgentMutation.variables === m.id}
+                                title={
+                                  showUpgrade
+                                    ? `Agent is outdated${m.agent_version ? ` (v${m.agent_version})` : ''} — upgrade it`
+                                    : m.agent_install_error
+                                      ? `Last error: ${m.agent_install_error}`
+                                      : 'Install gopher-agent on this machine'
+                                }
+                                className={`px-2 py-1 text-xs rounded border flex items-center gap-1 transition-colors ${
+                                  m.agent_install_error
+                                    ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                                }`}
+                              >
+                                {installAgentMutation.isPending && installAgentMutation.variables === m.id
+                                  ? <><Loader2 size={11} className="animate-spin" /> {showUpgrade ? 'Upgrading…' : 'Installing…'}</>
+                                  : showUpgrade
+                                    ? <>Upgrade agent</>
+                                    : m.agent_install_error
+                                      ? <>Retry install</>
+                                      : <>Install agent</>}
+                              </button>
+                            )
+                          }
+                          // Installed and either current, or offline — report the last-known version.
+                          const healthy = reachable && !m.agent_outdated
+                          return (
+                            <span
+                              title={reachable ? 'Agent version' : 'Last known agent version (machine offline)'}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium border ${
+                                healthy
+                                  ? 'text-green-700 bg-green-50 border-green-200'
+                                  : 'text-gray-600 bg-gray-50 border-gray-200'
+                              }`}
+                            >
+                              {healthy ? <CheckCircle size={11} /> : null} v{m.agent_version || '–'}
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td
                         className="px-4 py-3 text-gray-500"
