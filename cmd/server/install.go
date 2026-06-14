@@ -139,6 +139,17 @@ func runInstall(args []string) error {
 		return fmt.Errorf("failed to set data dir ownership: %w", err)
 	}
 
+	// The supervisor extracts the bundled caddy/rathole into /opt/gopher/bin at
+	// startup; gopher runs as cfg.user (unprivileged), so the dir must be
+	// gopher-owned (the install dir itself is root-owned). Mirrors reinstall.sh.
+	binDir := filepath.Join(cfg.installDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", binDir, err)
+	}
+	if err := chownRecursive(cfg.user, binDir); err != nil {
+		return fmt.Errorf("failed to set bin dir ownership: %w", err)
+	}
+
 	sudoersPath := filepath.Join("/etc/sudoers.d", cfg.user)
 	sudoersContent := buildSudoers(cfg.user)
 	if err := os.WriteFile(sudoersPath, []byte(sudoersContent), 0440); err != nil {
