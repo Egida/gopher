@@ -449,7 +449,7 @@ export default function TunnelsPage() {
               const localPortConflict = !isEdit && form.local_port > 0 && form.machine_id !== '' &&
                 tunnels.some(t => t.machine_id === form.machine_id && t.local_port === form.local_port)
               const canCreate = form.machine_id !== '' && form.name.trim() !== '' &&
-                form.rathole_port > 0 && !serverPortConflict && !localPortConflict && !createMutation.isPending
+                form.local_port > 0 && form.rathole_port > 0 && !serverPortConflict && !localPortConflict && !createMutation.isPending
               const canSave = form.name.trim() !== '' && !updateMutation.isPending
               return (
             <>
@@ -509,7 +509,7 @@ export default function TunnelsPage() {
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-500 font-mono shrink-0">localhost:</span>
-                  <input type="number" value={form.local_port} onChange={e => setForm(f => ({ ...f, local_port: Number(e.target.value) }))}
+                  <input type="number" value={form.local_port || ''} onChange={e => setForm(f => ({ ...f, local_port: Number(e.target.value) }))}
                     className={`flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 border ${
                       localPortConflict
                         ? 'border-amber-400 focus:ring-amber-400 bg-amber-50'
