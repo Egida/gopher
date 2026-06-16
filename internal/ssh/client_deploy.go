@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/smalex-z/gopher/internal/build"
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 //go:embed templates/client-install.sh
@@ -19,6 +20,7 @@ func buildClientServiceUnit(username, ratholebin string) string {
 	unit := clientServiceTemplate
 	unit = strings.ReplaceAll(unit, "{{.Username}}", username)
 	unit = strings.ReplaceAll(unit, "{{.RatholeBin}}", ratholebin)
+	unit = strings.ReplaceAll(unit, "{{.ConfigPath}}", paths.RatholeClientConfig)
 	return unit
 }
 
@@ -49,9 +51,13 @@ func DeployClient(client *SSHClient, machineID, username, config string, logWrit
 
 	fmt.Fprintln(logWriter, "Step 2: Writing rathole client config...")
 
-	// Create /etc/rathole directory and write config with proper ownership.
-	if _, err := client.Execute(sudo("mkdir -p /etc/rathole")); err != nil {
-		return fmt.Errorf("failed to create /etc/rathole: %w", err)
+	// Write the client config under the consolidated /etc/gopher layout. A full
+	// redeploy adopts the new paths wholesale (it rewrites the unit below), which
+	// also migrates a legacy machine forward. The legacy /etc/rathole copy, if
+	// any, is left untouched — orphaned but harmless — since the unit now points
+	// at the new path.
+	if _, err := client.Execute(sudo("mkdir -p " + paths.RatholeDir)); err != nil {
+		return fmt.Errorf("failed to create %s: %w", paths.RatholeDir, err)
 	}
 
 	// Determine the rathole binary path.
@@ -61,12 +67,12 @@ func DeployClient(client *SSHClient, machineID, username, config string, logWrit
 	}
 	ratholebin = strings.TrimSpace(ratholebin)
 
-	if err := client.UploadFile([]byte(config), "/etc/rathole/client.toml"); err != nil {
+	if err := client.UploadFile([]byte(config), paths.RatholeClientConfig); err != nil {
 		return fmt.Errorf("failed to write client config: %w", err)
 	}
 
-	// Fix ownership so the SSH user can update the config later.
-	if _, err := client.Execute(sudo(fmt.Sprintf("chown %s /etc/rathole /etc/rathole/client.toml", username))); err != nil {
+	// Fix ownership so the agent/SSH user can update the config later.
+	if _, err := client.Execute(sudo(fmt.Sprintf("chown %s %s %s", username, paths.RatholeDir, paths.RatholeClientConfig))); err != nil {
 		return fmt.Errorf("failed to fix ownership: %w", err)
 	}
 

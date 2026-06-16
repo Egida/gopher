@@ -41,7 +41,22 @@ const (
 const (
 	CaddyfilePath = ConfigDir + "/caddy/Caddyfile"
 	CaddyConfDir  = ConfigDir + "/caddy/conf.d"
-	RatholeConfig = ConfigDir + "/rathole/server.toml"
+	RatholeDir    = ConfigDir + "/rathole"
+	RatholeConfig = RatholeDir + "/server.toml"
+)
+
+// Origin (client machine) layout. The same /etc/gopher consolidation applied to
+// the edge, applied to the machines that tunnel into it: the rathole client
+// config and the gopher-agent's env file live under /etc/gopher instead of the
+// legacy /etc/rathole and /etc/gopher-agent. The client config shares the
+// rathole/ dir with the edge's server.toml; the agent's env gets its own
+// agent/ dir. The agent migrates an existing origin onto these on its first
+// post-upgrade boot (see cmd/agent migrate).
+const (
+	RatholeClientConfig = RatholeDir + "/client.toml"
+	RatholeVPSKey       = RatholeDir + "/vps_key.pub"
+	AgentDir            = ConfigDir + "/agent"
+	AgentConfigEnv      = AgentDir + "/config.env"
 )
 
 // Persistent state.
@@ -57,8 +72,16 @@ const (
 const (
 	LegacyRatholeConfig = "/etc/rathole/server.toml"
 	LegacyRatholeBin    = "/usr/local/bin/rathole"
-	LegacyCaddyfile    = "/etc/caddy/Caddyfile"
-	LegacyCaddyConfDir = "/etc/caddy/conf.d"
+	LegacyCaddyfile     = "/etc/caddy/Caddyfile"
+	LegacyCaddyConfDir  = "/etc/caddy/conf.d"
+
+	// Legacy origin locations (pre-consolidation). The agent migrates off these;
+	// the server probes new-then-legacy so un-migrated machines keep working.
+	LegacyRatholeClientConfig = "/etc/rathole/client.toml"
+	LegacyRatholeClientDir    = "/etc/rathole"
+	LegacyRatholeVPSKey       = "/etc/rathole/vps_key.pub"
+	LegacyAgentConfigEnv      = "/etc/gopher-agent/config.env"
+	LegacyAgentDir            = "/etc/gopher-agent"
 	// LegacyCaddyData is the apt Caddy's actual data root. That Caddy runs as
 	// User=caddy with HOME=/var/lib/caddy and uses $HOME/.local/share/caddy (NOT
 	// XDG_DATA_HOME), so the certs live one level deep. The supervised Caddy uses

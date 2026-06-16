@@ -300,7 +300,7 @@ func (s *LocalSetupService) updateClientTomlViaSSH(machine *db.Machine, transfor
 	}
 	defer sshClient.Close()
 
-	existing, err := sshClient.Execute("cat /etc/rathole/client.toml 2>/dev/null || cat ~/.config/rathole/client.toml 2>/dev/null")
+	existing, err := sshClient.Execute("cat " + paths.RatholeClientConfig + " 2>/dev/null || cat " + paths.LegacyRatholeClientConfig + " 2>/dev/null || cat ~/.config/rathole/client.toml 2>/dev/null")
 	if err != nil {
 		existing = ""
 	}
@@ -309,16 +309,23 @@ func (s *LocalSetupService) updateClientTomlViaSSH(machine *db.Machine, transfor
 		return err
 	}
 
-	// Resolve absolute config path (SFTP cannot expand $HOME).
-	configPath := "/etc/rathole/client.toml"
-	if _, err2 := sshClient.Execute("test -f /etc/rathole/client.toml"); err2 != nil {
-		homeDir, _ := sshClient.Execute("echo $HOME")
-		homeDir = strings.TrimSpace(homeDir)
-		if homeDir == "" {
-			homeDir = "/home/" + machine.Username
+	// Resolve absolute config path (SFTP cannot expand $HOME). Prefer the
+	// consolidated /etc/gopher path (agent-migrated machines), fall back to the
+	// legacy /etc/rathole path (machines without the migrated agent), then the
+	// user-level config for rootless/no-systemd boxes.
+	configPath := paths.RatholeClientConfig
+	if _, err2 := sshClient.Execute("test -f " + paths.RatholeClientConfig); err2 != nil {
+		if _, err3 := sshClient.Execute("test -f " + paths.LegacyRatholeClientConfig); err3 == nil {
+			configPath = paths.LegacyRatholeClientConfig
+		} else {
+			homeDir, _ := sshClient.Execute("echo $HOME")
+			homeDir = strings.TrimSpace(homeDir)
+			if homeDir == "" {
+				homeDir = "/home/" + machine.Username
+			}
+			configPath = homeDir + "/.config/rathole/client.toml"
+			_, _ = sshClient.Execute("mkdir -p " + homeDir + "/.config/rathole")
 		}
-		configPath = homeDir + "/.config/rathole/client.toml"
-		_, _ = sshClient.Execute("mkdir -p " + homeDir + "/.config/rathole")
 	}
 
 	// In-place write: rathole's notify watcher subscribes to the inode of
