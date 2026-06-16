@@ -132,6 +132,11 @@ func main() {
 		log.Fatal("GOPHER_AGENT_TOKEN is required (env var or /etc/gopher-agent/config.env)")
 	}
 
+	// Local self-healing watchdog: keeps rathole-client alive even when its
+	// config is broken and the server can't reach in (the control channel rides
+	// the very tunnel that's down). Runs independently of the gRPC surface.
+	go ratholeRecoveryLoop(cfg.UnitName)
+
 	srv := &agentServer{cfg: cfg, startedAt: time.Now()}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)

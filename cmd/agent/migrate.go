@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/smalex-z/gopher/internal/paths"
 )
@@ -38,25 +39,21 @@ func migrateOriginLayout() {
 		return // already on the consolidated layout (or a fresh 0.2.1 bootstrap)
 	}
 
-	// Before touching anything, make sure the rathole config we'd relocate is
-	// actually loadable. Relocating means restarting rathole-client, and a
-	// restart re-reads the file from disk — so a latent on-disk error that the
-	// running rathole survived (it rejected the inotify reload and kept its good
-	// in-memory config) would turn fatal on restart and drop every tunnel. If
-	// the config is broken, refuse to migrate and leave the machine exactly as
-	// it is (up, on its current config); the operator fixes the config and the
-	// next boot retries. This is the one failure mode that can take a healthy
-	// origin offline, so it gates the whole routine.
+	// Before touching anything, repair the rathole config we'd relocate.
+	// Relocating restarts rathole-client, and a restart re-reads the file from
+	// disk — so a latent on-disk error the running rathole survived (it rejected
+	// the inotify reload and kept its good in-memory config) would turn fatal on
+	// restart and drop every tunnel. Recovery is the agent's whole job, so heal
+	// it: de-duplicate, write the clean version back, and only then proceed. If
+	// it still won't validate after repair, leave the box untouched (up, on its
+	// current config) rather than detonating it.
 	srcConfig := paths.LegacyRatholeClientConfig
 	if !legacyClient {
 		srcConfig = paths.RatholeClientConfig
 	}
-	if data, err := os.ReadFile(srcConfig); err == nil { // #nosec G304 — fixed config paths
-		if dup, ok := duplicateTomlTable(string(data)); ok {
-			log.Printf("origin layout migration: REFUSING to migrate — %s has a duplicate table [%s]; "+
-				"rathole would fail to restart on the new path. Fix the duplicate, then reboot the agent to retry.", srcConfig, dup)
-			return
-		}
+	if !repairRatholeConfig(srcConfig) {
+		log.Printf("origin layout migration: %s still won't validate after repair — leaving the machine as-is, will retry next boot", srcConfig)
+		return
 	}
 
 	log.Printf("origin layout migration: consolidating config under %s", paths.ConfigDir)
@@ -137,6 +134,168 @@ func migrateOriginLayout() {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// activeClientTomlPath returns the rathole client.toml the box is actually
+// using: the consolidated path if present, else the legacy one.
+func activeClientTomlPath() string {
+	if fileExists(paths.RatholeClientConfig) {
+		return paths.RatholeClientConfig
+	}
+	if fileExists(paths.LegacyRatholeClientConfig) {
+		return paths.LegacyRatholeClientConfig
+	}
+	return paths.RatholeClientConfig
+}
+
+// repairRatholeConfig de-duplicates the rathole client config at path in place
+// and reports whether it ends up loadable (no duplicate tables). A clean config
+// is a no-op that returns true. The agent owns this file (chowned at bootstrap),
+// so the in-place truncate-write preserves the inode and rathole hot-reloads it
+// without a flap when it is running. Returns false only if the file can't be
+// read or can't be repaired into a loadable state.
+func repairRatholeConfig(path string) bool {
+	data, err := os.ReadFile(path) // #nosec G304 — fixed config paths
+	if err != nil {
+		// Nothing here to relocate/repair (e.g. user-level config); not our
+		// failure — let the caller proceed.
+		return true
+	}
+	if _, dup := duplicateTomlTable(string(data)); !dup {
+		return true
+	}
+
+	fixed := dedupeTomlTables(string(data))
+	if _, stillDup := duplicateTomlTable(fixed); stillDup || fixed == string(data) {
+		return false // couldn't actually resolve it — don't claim success
+	}
+	if err := writeFilePreservingMode(path, []byte(fixed)); err != nil {
+		log.Printf("rathole config repair: failed writing de-duplicated %s: %v", path, err)
+		return false
+	}
+	log.Printf("rathole config repair: removed duplicate table(s) from %s", path)
+	return true
+}
+
+// ratholeRecoveryLoop is the agent's local self-healing watchdog. systemd keeps
+// rathole-client alive across crashes (Restart=always), but a config it can't
+// parse lands the unit in "failed" once the restart-burst limit trips, and the
+// server can't reach in to fix it because the back-channel rides that very
+// tunnel. So the agent — which stays up independently — periodically repairs the
+// config and resurrects a down unit. This is exactly the failure that took a
+// machine offline: a duplicate table rathole choked on at startup.
+func ratholeRecoveryLoop(unit string) {
+	recoverRatholeOnce(unit)
+	t := time.NewTicker(60 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		recoverRatholeOnce(unit)
+	}
+}
+
+func recoverRatholeOnce(unit string) {
+	_ = repairRatholeConfig(activeClientTomlPath())
+
+	if active, _ := unitActive(unit); active {
+		return
+	}
+	// Unit is down. Clear any failed-state burst counter, then start (not
+	// restart — start is a no-op on a healthy unit and never flaps live tunnels).
+	_ = sudo("systemctl", "reset-failed", unit)
+	if err := sudo("systemctl", "start", unit); err != nil {
+		log.Printf("rathole recovery: start %s failed: %v", unit, err)
+		return
+	}
+	log.Printf("rathole recovery: started %s (was down)", unit)
+}
+
+// dedupeTomlTables removes duplicate `[table]` definitions, keeping the first
+// occurrence of each (along with its surrounding `# gopher-*` marker block, when
+// present) and dropping later ones. This is the keep-first complement of the
+// server's strip-and-rebuild reconcile, done purely on text because the agent
+// has no DB to rebuild from. `[[array.of.tables]]` is left alone — those may
+// legally repeat.
+func dedupeTomlTables(content string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	seen := make(map[string]struct{})
+	n := len(lines)
+
+	keep := func(block []string, name string) {
+		if name != "" {
+			if _, dup := seen[name]; dup {
+				return // drop the duplicate block entirely
+			}
+			seen[name] = struct{}{}
+		}
+		out = append(out, block...)
+	}
+
+	for i := 0; i < n; {
+		t := strings.TrimSpace(lines[i])
+
+		switch {
+		case isMarkerStart(t):
+			j := i + 1
+			for j < n {
+				tj := strings.TrimSpace(lines[j])
+				if isMarkerEnd(tj) {
+					j++ // include the end marker
+					break
+				}
+				if isMarkerStart(tj) {
+					break // malformed: next block starts before this one ended
+				}
+				j++
+			}
+			keep(lines[i:j], firstTableName(lines[i:j]))
+			i = j
+		case isTableHeader(t):
+			j := i + 1
+			for j < n {
+				tj := strings.TrimSpace(lines[j])
+				if isTableHeader(tj) || isMarkerStart(tj) {
+					break
+				}
+				j++
+			}
+			keep(lines[i:j], tableNameFromHeader(t))
+			i = j
+		default:
+			out = append(out, lines[i])
+			i++
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func isMarkerStart(t string) bool {
+	return strings.HasPrefix(t, "# gopher-") && strings.Contains(t, "-start:")
+}
+
+func isMarkerEnd(t string) bool {
+	return strings.HasPrefix(t, "# gopher-") && strings.Contains(t, "-end:")
+}
+
+func isTableHeader(t string) bool {
+	return strings.HasPrefix(t, "[") && !strings.HasPrefix(t, "[[") && strings.Contains(t, "]")
+}
+
+func tableNameFromHeader(t string) string {
+	end := strings.Index(t, "]")
+	if end <= 1 {
+		return ""
+	}
+	return strings.TrimSpace(t[1:end])
+}
+
+func firstTableName(block []string) string {
+	for _, line := range block {
+		if t := strings.TrimSpace(line); isTableHeader(t) {
+			return tableNameFromHeader(t)
+		}
+	}
+	return ""
 }
 
 // duplicateTomlTable scans a TOML document for a `[table]` header declared more
