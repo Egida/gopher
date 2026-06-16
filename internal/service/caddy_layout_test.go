@@ -65,3 +65,23 @@ func TestManagedCaddyPaths(t *testing.T) {
 		t.Fatalf("tunnel path = %s, want %s", got, want)
 	}
 }
+
+// Regression for the gopherden migration: a legacy/non-gopher Caddyfile carrying
+// its own `import .../conf.d/*.caddy` line must not have that import survive in
+// the custom section — else it re-imports a stale conf.d and caddy crash-loops
+// with "ambiguous site definition".
+func TestBuildManagedCaddyfile_StripsLegacyConfDImport(t *testing.T) {
+	existing := "import /etc/caddy/conf.d/*.caddy\n\n" +
+		"gopherden.org {\n\troot * /var/www/gopherden\n\tfile_server\n}\n"
+	out := buildManagedCaddyfile(existing, "")
+
+	if !strings.Contains(out, "import "+paths.CaddyConfDir+"/*.caddy") {
+		t.Fatalf("expected the managed conf.d import, got:\n%s", out)
+	}
+	if strings.Contains(out, "import /etc/caddy/conf.d") {
+		t.Fatalf("legacy conf.d import leaked into the custom section:\n%s", out)
+	}
+	if !strings.Contains(out, "gopherden.org {") {
+		t.Fatalf("user's custom site block was dropped:\n%s", out)
+	}
+}

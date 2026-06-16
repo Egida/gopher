@@ -208,9 +208,6 @@ function DNSPreflightBanner({
 
 function ServicesStep({ onDone }: { onDone: () => void }) {
   const [domain, setDomain] = useState('')
-  const [serverHost, setServerHost] = useState('')
-  const [detectingIP, setDetectingIP] = useState(false)
-  const [skipCaddy, setSkipCaddy] = useState(false)
   const [status, setStatus] = useState<LocalServiceStatus | null>(null)
   const [showLogs, setShowLogs] = useState(false)
   const [skipping, setSkipping] = useState(false)
@@ -234,7 +231,6 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
       setStatus(s)
       if (s.domain) {
         setDomain(s.domain)
-        setSkipCaddy(false)
       }
     }).catch(() => {})
   }, [])
@@ -244,17 +240,7 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
     return () => clearInterval(t)
   }, [])
 
-  // Auto-detect public IP when switching to rathole-only mode
-  useEffect(() => {
-    if (!skipCaddy || serverHost) return
-    setDetectingIP(true)
-    localApi.detectIP()
-      .then(({ ip }) => { if (ip) setServerHost(ip) })
-      .catch(() => {})
-      .finally(() => setDetectingIP(false))
-  }, [skipCaddy, serverHost])
-
-  // Detect the public IP once on mount regardless of skipCaddy — the DNS
+  // Detect the public IP once on mount — the DNS
   // preflight needs it for the ip_match check (catches parking-page IPs
   // and stale records pointing at the wrong host). Cheap, runs in parallel
   // with everything else, swallows errors silently.
@@ -270,12 +256,6 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
   // to retype the domain before the check became aware of the IP.
   useEffect(() => {
     if (dnsTimerRef.current) clearTimeout(dnsTimerRef.current)
-    if (skipCaddy) {
-      setDnsStatus('idle')
-      setDnsMessage('')
-      setDnsResult(null)
-      return
-    }
     const trimmed = domain.trim()
     if (!trimmed || !trimmed.includes('.')) {
       setDnsStatus('idle')
@@ -302,7 +282,7 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
       }
     }, 1200)
     return () => { if (dnsTimerRef.current) clearTimeout(dnsTimerRef.current) }
-  }, [domain, skipCaddy, serverIP])
+  }, [domain, serverIP])
 
   // Advance to step 3 (firewall) once install completes. We deliberately do NOT
   // redirect to https://router.{domain} here — port 80/443 may still be blocked by
@@ -314,7 +294,10 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
     return () => clearTimeout(t)
   }, [installComplete, onDone])
 
-  const allGood = status?.caddy_active === 'active' && status?.rathole_active === 'active'
+  // caddy + rathole are bundled and supervised, so they're up on every run — the
+  // meaningful distinction is whether this edge has already been configured
+  // (domain set), not whether the processes are alive.
+  const alreadyConfigured = status?.local_setup_done === true && Boolean(status?.domain)
 
   const handleSkip = async () => {
     setSkipping(true)
@@ -322,9 +305,7 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
     onDone()
   }
 
-  const canInstall = skipCaddy
-    ? Boolean(serverHost.trim() && (status == null || status.has_install_permission))
-    : Boolean(domain && dnsStatus === 'ok' && (status == null || status.has_install_permission))
+  const canInstall = Boolean(domain && dnsStatus === 'ok' && (status == null || status.has_install_permission))
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
@@ -333,63 +314,9 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
       </div>
 
       <p className="text-sm text-gray-600">
-        Gopher can install <strong>Caddy</strong> (HTTPS reverse proxy) and <strong>rathole</strong> (tunnel server)
-        as local systemd services. Enable Caddy for domain/subdomain routing, or skip it for raw rathole-only ports.
+        <strong>Caddy</strong> (HTTPS reverse proxy) and <strong>rathole</strong> (tunnel server) are bundled into
+        Gopher and run under it. Set your domain below — HTTPS and subdomain routing are configured automatically.
       </p>
-
-      <label className="flex items-start gap-3 text-sm text-gray-700">
-        <input
-          type="checkbox"
-          checked={skipCaddy}
-          onChange={e => setSkipCaddy(e.target.checked)}
-          className="mt-0.5"
-        />
-        <span>
-          <strong>Skip Caddy / reverse proxy</strong>
-          <span className="block text-xs text-gray-500 mt-0.5">
-            Use rathole only. URL/subdomain routing is disabled and tunnels use server ports directly.
-          </span>
-        </span>
-      </label>
-
-      {/* VPS host input (rathole-only mode) */}
-      {skipCaddy && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            VPS hostname or IP <span className="text-red-500">*</span>
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={serverHost}
-              onChange={e => setServerHost(e.target.value)}
-              placeholder={detectingIP ? 'Detecting…' : '203.0.113.10 or vps.example.com'}
-              disabled={detectingIP}
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
-              autoFocus
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setServerHost('')
-                setDetectingIP(true)
-                localApi.detectIP()
-                  .then(({ ip }) => { if (ip) setServerHost(ip) })
-                  .catch(() => {})
-                  .finally(() => setDetectingIP(false))
-              }}
-              disabled={detectingIP}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-              title="Re-detect public IP"
-            >
-              {detectingIP ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            </button>
-          </div>
-          <p className="text-xs text-gray-400 mt-1">
-            Used as the rathole server address in client configs — must be reachable from your private machines.
-          </p>
-        </div>
-      )}
 
       {/* Permission warning */}
       {status && !status.has_install_permission && (
@@ -414,33 +341,31 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
       )}
 
       {/* Domain input */}
-      {!skipCaddy && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Your domain <span className="text-red-500">*</span>{' '}
-            <span className="text-gray-400 font-normal">(e.g. <code>example.com</code>)</span>
-          </label>
-          <input
-            type="text"
-            value={domain}
-            onChange={e => setDomain(e.target.value)}
-            placeholder="example.com"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            required
-            autoFocus
-          />
-          {domain ? (
-            <p className="text-xs text-gray-400 mt-1">
-              Dashboard will be accessible at <strong>https://router.{domain}</strong>
-            </p>
-          ) : (
-            <p className="text-xs text-orange-500 mt-1">Required — used to configure the Caddy reverse proxy</p>
-          )}
-        </div>
-      )}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Your domain <span className="text-red-500">*</span>{' '}
+          <span className="text-gray-400 font-normal">(e.g. <code>example.com</code>)</span>
+        </label>
+        <input
+          type="text"
+          value={domain}
+          onChange={e => setDomain(e.target.value)}
+          placeholder="example.com"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+          autoFocus
+        />
+        {domain ? (
+          <p className="text-xs text-gray-400 mt-1">
+            Dashboard will be accessible at <strong>https://router.{domain}</strong>
+          </p>
+        ) : (
+          <p className="text-xs text-orange-500 mt-1">Required — Caddy needs it for HTTPS + subdomain routing</p>
+        )}
+      </div>
 
       {/* DNS preflight banner */}
-      {!skipCaddy && domain && domain.includes('.') && (
+      {domain && domain.includes('.') && (
         <DNSPreflightBanner
           domain={domain}
           serverIP={serverIP}
@@ -463,11 +388,9 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
           onClick={() => setShowLogs(true)}
           disabled={!canInstall}
           className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title={!skipCaddy && dnsStatus !== 'ok' ? 'Waiting for DNS to resolve before installing…' : undefined}
+          title={dnsStatus !== 'ok' ? 'Waiting for DNS to resolve before installing…' : undefined}
         >
-          {skipCaddy
-            ? (status?.rathole_active === 'active' ? '↻ Re-configure Rathole' : '⚙ Install Rathole Only')
-            : (allGood ? '↻ Re-configure' : '⚙ Install & Configure')}
+          {alreadyConfigured ? '↻ Re-configure' : '⚙ Install & Configure'}
         </button>
         <button
           onClick={handleSkip}
@@ -483,7 +406,7 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
         onClose={() => { setShowLogs(false); load() }}
         onComplete={() => setInstallComplete(true)}
         title="Installing Local Services"
-        onStart={() => localApi.install(skipCaddy ? '' : domain, skipCaddy ? serverHost.trim() : domain, skipCaddy)}
+        onStart={() => localApi.install(domain)}
         wsPath="/api/local/logs/ws"
         autoStart
       />

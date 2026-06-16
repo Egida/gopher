@@ -61,14 +61,14 @@ func privilegedCmdPrefix() []string {
 // Returns ErrOpInProgress if another long-running op (install, firewall
 // configure, fail2ban setup) is already streaming through the hub. The
 // goroutine releases the op lock when DONE is broadcast.
-func (s *LocalSetupService) Install(domain, serverHost string, skipCaddy bool) error {
+func (s *LocalSetupService) Install(domain string) error {
 	if !s.hub.TryAcquireOp() {
 		return ErrOpInProgress
 	}
 	go goSafe("localInstall", func() {
 		defer s.hub.ReleaseOp()
 		w := &hubWriter{hub: s.hub}
-		if err := s.doInstall(domain, serverHost, skipCaddy, w); err != nil {
+		if err := s.doInstall(domain, w); err != nil {
 			fmt.Fprintf(w, "ERROR: %v\n", err)
 			s.hub.Broadcast("\x00ERROR")
 			return
@@ -114,7 +114,7 @@ func (s *LocalSetupService) Skip(domain string) error {
 	})
 }
 
-func (s *LocalSetupService) doInstall(domain, serverHost string, skipCaddy bool, logWriter io.Writer) error {
+func (s *LocalSetupService) doInstall(domain string, logWriter io.Writer) error {
 	fmt.Fprintln(logWriter, "=== Installing Local Services ===")
 
 	// Steps 1-2: caddy + rathole are bundled into the gopher binary and extracted
@@ -127,43 +127,37 @@ func (s *LocalSetupService) doInstall(domain, serverHost string, skipCaddy bool,
 		fmt.Fprintln(logWriter, "Steps 1-2: WARNING — non-embedded build; caddy/rathole are not bundled. Config will be written but they won't be supervised.")
 	}
 
-	// Step 3: Caddyfile — import-based layout + managed conf.d entries
-	if skipCaddy {
-		fmt.Fprintln(logWriter, "Step 3: Skipping Caddyfile configuration")
-	} else {
-		fmt.Fprintln(logWriter, "Step 3: Configuring import-based /etc/caddy/Caddyfile and /etc/caddy/conf.d...")
-		existingCaddy := ""
-		if data, readErr := os.ReadFile(caddyConfigPath); readErr == nil {
-			existingCaddy = string(data)
-		}
-		bindIP := ""
-			if s, sErr := db.GetSettings(); sErr == nil {
-				bindIP = s.BindIP
-			}
-			managedCaddy := buildManagedCaddyfile(existingCaddy, bindIP)
-		managedHosts := []string{fmt.Sprintf("router.%s", domain)}
-		if tunnels, tunErr := db.GetTunnels(); tunErr == nil {
-			for _, tunnel := range tunnels {
-				if tunnel.Subdomain != "" {
-					managedHosts = append(managedHosts, fmt.Sprintf("%s.%s", tunnel.Subdomain, domain))
-				}
+	// Step 3: Caddyfile — import-based layout + managed conf.d entries. Caddy is
+	// always configured (no rathole-only mode): HTTPS + subdomain routing is what
+	// makes this an edge, not a rathole UI.
+	fmt.Fprintf(logWriter, "Step 3: Configuring %s and %s...\n", caddyConfigPath, caddyManagedDir)
+	existingCaddy := ""
+	if data, readErr := os.ReadFile(caddyConfigPath); readErr == nil {
+		existingCaddy = string(data)
+	}
+	bindIP := ""
+	if s, sErr := db.GetSettings(); sErr == nil {
+		bindIP = s.BindIP
+	}
+	managedCaddy := buildManagedCaddyfile(existingCaddy, bindIP)
+	managedHosts := []string{fmt.Sprintf("router.%s", domain)}
+	if tunnels, tunErr := db.GetTunnels(); tunErr == nil {
+		for _, tunnel := range tunnels {
+			if tunnel.Subdomain != "" {
+				managedHosts = append(managedHosts, fmt.Sprintf("%s.%s", tunnel.Subdomain, domain))
 			}
 		}
-		managedCaddy = removeHostsFromCustomSection(managedCaddy, managedHosts)
+	}
+	managedCaddy = removeHostsFromCustomSection(managedCaddy, managedHosts)
 
-		if err := sudoMkdir(caddyManagedDir); err != nil {
-			return fmt.Errorf("failed to create %s: %w", caddyManagedDir, err)
-		}
-		if err := writeLocalFile(caddyConfigPath, managedCaddy); err != nil {
-			return fmt.Errorf("failed to write %s: %w", caddyConfigPath, err)
-		}
-		installBindIP := ""
-		if installSettings, sErr := db.GetSettings(); sErr == nil {
-			installBindIP = installSettings.BindIP
-		}
-		if err := writeLocalFile(managedRouterCaddyPath(), buildRouterCaddyBlock(domain, installBindIP)); err != nil {
-			return fmt.Errorf("failed to write router Caddy file: %w", err)
-		}
+	if err := sudoMkdir(caddyManagedDir); err != nil {
+		return fmt.Errorf("failed to create %s: %w", caddyManagedDir, err)
+	}
+	if err := writeLocalFile(caddyConfigPath, managedCaddy); err != nil {
+		return fmt.Errorf("failed to write %s: %w", caddyConfigPath, err)
+	}
+	if err := writeLocalFile(managedRouterCaddyPath(), buildRouterCaddyBlock(domain, bindIP)); err != nil {
+		return fmt.Errorf("failed to write router Caddy file: %w", err)
 	}
 
 	// Step 4: Rathole server.toml — migrate existing if present, create fresh if not
@@ -202,15 +196,9 @@ func (s *LocalSetupService) doInstall(domain, serverHost string, skipCaddy bool,
 	// Step 11: Persist settings
 	var dashboardPrivate bool
 	if err := db.MutateSettings(func(settings *db.AppSettings) error {
-		if skipCaddy {
-			settings.Domain = ""
-			settings.ServerHost = serverHost
-			settings.DashboardPrivate = false // no Caddy — must keep dashboard port public
-		} else {
-			settings.Domain = domain
-			settings.ServerHost = domain // domain doubles as the rathole host when Caddy is active
-			settings.DashboardPrivate = true // Caddy is set up; restrict dashboard port, use router.domain
-		}
+		settings.Domain = domain
+		settings.ServerHost = domain      // domain doubles as the rathole host; Caddy fronts router.<domain>
+		settings.DashboardPrivate = true  // dashboard reached via router.<domain>, not the raw port
 		settings.LocalSetupDone = true
 		settings.Fail2banSetupDone = fail2banOK
 		dashboardPrivate = settings.DashboardPrivate
@@ -222,11 +210,7 @@ func (s *LocalSetupService) doInstall(domain, serverHost string, skipCaddy bool,
 	ApplyDashboardPort(dashboardPrivate)
 
 	fmt.Fprintln(logWriter, "=== Local Setup Complete ===")
-	if skipCaddy {
-		fmt.Fprintln(logWriter, "Dashboard: local mode (reverse proxy disabled)")
-	} else {
-		fmt.Fprintf(logWriter, "Dashboard: https://router.%s\n", domain)
-	}
+	fmt.Fprintf(logWriter, "Dashboard: https://router.%s\n", domain)
 
 	// Embedded build: kick gopher so the supervisor brings up caddy + rathole
 	// with the config just written (on a fresh edge the supervisor no-op'd at

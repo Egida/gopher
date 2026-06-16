@@ -135,6 +135,25 @@ func stripCaddyCustomHeader(s string) string {
 	return strings.TrimSpace(strings.Join(lines[i:], "\n"))
 }
 
+// stripManagedCaddyImports removes any `import .../conf.d/*.caddy` line from
+// custom Caddy content. Gopher manages the import directive itself; a stale one
+// absorbed from a legacy Caddyfile would import the wrong conf.d.
+func stripManagedCaddyImports(body string) string {
+	if body == "" {
+		return ""
+	}
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "import ") && strings.Contains(t, "conf.d") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 func buildManagedCaddyfile(existing, bindIP string) string {
 	customBody := extractCaddyCustomBody(existing)
 	if customBody == "" && strings.TrimSpace(existing) != "" && !strings.Contains(existing, caddyCustomBeginMark) {
@@ -145,6 +164,13 @@ func buildManagedCaddyfile(existing, bindIP string) string {
 		// generated header back into the custom section.
 		customBody = strings.TrimSpace(existing)
 	}
+	// A legacy/non-gopher Caddyfile (e.g. the apt default, or a box that already
+	// served its own site) carries its own `import .../conf.d/*.caddy` line.
+	// Absorbed into the custom section it would re-import a stale conf.d (e.g. an
+	// old /etc/caddy/conf.d/gopher-router.caddy), producing "ambiguous site
+	// definition" errors that crash-loop caddy. Gopher owns the import directive
+	// (re-added below), so strip any conf.d import from the custom body.
+	customBody = strings.TrimSpace(stripManagedCaddyImports(customBody))
 
 	var out strings.Builder
 	out.WriteString("# Gopher managed Caddyfile\n")
