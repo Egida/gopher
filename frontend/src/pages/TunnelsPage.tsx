@@ -97,23 +97,10 @@ export default function TunnelsPage() {
   const domain = localStatus?.domain
   const routingEnabled = Boolean(domain)
 
-  const { data: domainIPData } = useQuery({
-    queryKey: ['resolve-ip', domain ?? ''],
-    queryFn: () => localApi.resolveIP(domain!),
-    enabled: !!domain,
-    staleTime: 10 * 60 * 1000,
-  })
-  const { data: routerIPData } = useQuery({
-    queryKey: ['resolve-ip', domain ? `router.${domain}` : ''],
-    queryFn: () => localApi.resolveIP(`router.${domain}`),
-    enabled: !!domain,
-    staleTime: 10 * 60 * 1000,
-  })
-  const domainIP = domainIPData?.ip ?? ''
-  const routerIP = routerIPData?.ip ?? ''
-  const displayHost = domain
-    ? (domainIP && routerIP && domainIP === routerIP ? domain : `router.${domain}`)
-    : undefined
+  // Raw-TCP tunnel host shown to operators. Source of truth is the backend's
+  // ServerHost (defaults to router.<domain>) — the exact host baked into each
+  // client's remote_addr — rather than guessing apex-vs-router by resolved IP.
+  const displayHost = localStatus?.server_host || (domain ? `router.${domain}` : undefined)
 
   // Deep-link entry from MachinesPage ("/tunnels?machine=..."). Mirrors
   // openAddModal's nextPort() prefetch so the rathole-port input lands
