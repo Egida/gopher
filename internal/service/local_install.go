@@ -197,8 +197,14 @@ func (s *LocalSetupService) doInstall(domain string, logWriter io.Writer) error 
 	var dashboardPrivate bool
 	if err := db.MutateSettings(func(settings *db.AppSettings) error {
 		settings.Domain = domain
-		settings.ServerHost = domain      // domain doubles as the rathole host; Caddy fronts router.<domain>
-		settings.DashboardPrivate = true  // dashboard reached via router.<domain>, not the raw port
+		// The rathole transport host (client remote_addr), jumpbox SSH host, and
+		// raw-TCP tunnel host all key off ServerHost. Default it to router.<domain>,
+		// NOT the bare apex: the apex is the name an operator is most likely to
+		// repoint (landing page, redirect, MX), and that would kill every tunnel +
+		// jumpbox at once. router.<domain> resolves to the edge via the same
+		// wildcard that serves the dashboard, so it costs no extra DNS.
+		settings.ServerHost = "router." + domain
+		settings.DashboardPrivate = true // dashboard reached via router.<domain>, not the raw port
 		settings.LocalSetupDone = true
 		settings.Fail2banSetupDone = fail2banOK
 		dashboardPrivate = settings.DashboardPrivate

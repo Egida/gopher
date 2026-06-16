@@ -133,23 +133,11 @@ export default function MachinesPage() {
     return { cmd: `ssh -J ${vpsUser}@${vpsHost}${keyFlag} -p ${m.tunnel_port} ${m.username}@localhost`, label: 'Jumpbox:', keyMissing: !key, isJumpbox: true }
   }
 
-  const { data: domainIPData } = useQuery({
-    queryKey: ['resolve-ip', domain],
-    queryFn: () => localApi.resolveIP(domain),
-    enabled: !!domain,
-    staleTime: 10 * 60 * 1000,
-  })
-  const { data: routerIPData } = useQuery({
-    queryKey: ['resolve-ip', `router.${domain}`],
-    queryFn: () => localApi.resolveIP(`router.${domain}`),
-    enabled: !!domain,
-    staleTime: 10 * 60 * 1000,
-  })
-  const domainIP = domainIPData?.ip ?? ''
-  const routerIP = routerIPData?.ip ?? ''
-  const displayHost = domain
-    ? (domainIP && routerIP && domainIP === routerIP ? domain : `router.${domain}`)
-    : ''
+  // The edge's stable transport host (jumpbox SSH + raw-TCP tunnel display).
+  // Source of truth is the backend's ServerHost (defaults to router.<domain>),
+  // which is exactly what's baked into each client.toml's remote_addr — so the
+  // displayed commands match reality instead of guessing apex-vs-router by IP.
+  const displayHost = localStatus?.server_host || (domain ? `router.${domain}` : '')
 
   // Drive the bootstrap modal through its phases off the live machine list:
   //

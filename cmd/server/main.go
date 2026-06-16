@@ -153,6 +153,13 @@ func runServer(args []string) {
 			if err := localSvc.MigrateRatholeNoise(); err != nil {
 				log.Printf("startup: rathole noise migration: %v", err)
 			}
+			// Move the rathole transport host off the bare apex onto
+			// router.<domain> so the apex can be repointed without dropping
+			// tunnels. No-op once migrated / on fresh installs. Runs after the
+			// noise migration so a single reconnect cycle carries both changes.
+			if err := localSvc.MigrateServerHostToRouter(); err != nil {
+				log.Printf("startup: server-host migration: %v", err)
+			}
 		}()
 	} else {
 		log.Printf("dev mode: skipping rathole/Caddy/sudoers/authorized_keys reconciles")
