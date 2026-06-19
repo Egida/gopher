@@ -88,23 +88,20 @@ func (h *LocalHandler) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Domain     string `json:"domain"`
-		ServerHost string `json:"server_host"`
-		SkipCaddy  bool   `json:"skip_caddy"`
+		Domain string `json:"domain"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		response.BadRequest(w, "invalid request body")
 		return
 	}
-	if !body.SkipCaddy && body.Domain == "" {
+	// A domain is always required — Caddy (HTTPS + subdomain routing) is integral
+	// to the edge; there's no rathole-only mode. Without it, it's just a rathole
+	// UI, not an edge.
+	if body.Domain == "" {
 		response.BadRequest(w, "domain is required")
 		return
 	}
-	if body.SkipCaddy && body.ServerHost == "" {
-		response.BadRequest(w, "server_host is required when skipping Caddy")
-		return
-	}
-	if err := h.svc.Install(body.Domain, body.ServerHost, body.SkipCaddy); err != nil {
+	if err := h.svc.Install(body.Domain); err != nil {
 		if errors.Is(err, service.ErrOpInProgress) {
 			response.Error(w, http.StatusConflict, err.Error())
 			return

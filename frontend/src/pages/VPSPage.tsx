@@ -123,10 +123,10 @@ export default function ServerPage() {
 
           {/* Service status */}
           <div className="bg-white rounded-xl shadow-sm border p-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-3">Systemd Services</h2>
+            <h2 className="text-base font-semibold text-gray-900 mb-3">Edge Services</h2>
             <div className="divide-y">
-              <ServiceRow label="caddy.service (reverse proxy)" active={status?.caddy_installed ? (status.caddy_active || 'unknown') : 'not-installed'} />
-              <ServiceRow label="rathole-server.service (tunnel server)" active={status?.rathole_installed ? (status.rathole_active || 'unknown') : 'not-installed'} />
+              <ServiceRow label="Caddy (reverse proxy)" active={status?.caddy_installed ? (status.caddy_active || 'unknown') : 'not-installed'} />
+              <ServiceRow label="rathole (tunnel server)" active={status?.rathole_installed ? (status.rathole_active || 'unknown') : 'not-installed'} />
             </div>
           </div>
 

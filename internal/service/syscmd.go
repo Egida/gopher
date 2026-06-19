@@ -3,9 +3,12 @@ package service
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"runtime/debug"
 	"strings"
+
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 // goSafe wraps a goroutine body with panic recovery so a panic in a
@@ -51,15 +54,28 @@ func systemctlReload(unit string) error {
 	return runSudoCommand("systemctl", "reload", unit)
 }
 
-// systemctlStart runs `sudo systemctl start <unit>`. systemctl start is a
-// no-op on an already-active unit, so this is the right call when a config
-// change has been written and rathole/caddy's notify watcher will reload —
-// we just want to cover the "service was stopped" case.
-func systemctlStart(unit string) error {
-	return runSudoCommand("systemctl", "start", unit)
-}
-
 // systemctlReloadOrRestart runs `sudo systemctl reload-or-restart <unit>`.
 func systemctlReloadOrRestart(unit string) error {
 	return runSudoCommand("systemctl", "reload-or-restart", unit)
+}
+
+// caddyReload reloads the running Caddy via its admin API (`caddy reload` posts
+// to the admin endpoint), so it works whether Caddy is managed by systemd or by
+// gopher's own supervisor — unlike `systemctl reload caddy`, which assumes a
+// caddy.service exists. Prefers the bundled binary, falling back to a caddy on
+// PATH. No sudo: it only reads its own config and hits the local admin socket.
+func caddyReload() error {
+	bin := paths.CaddyBin
+	if _, err := os.Stat(bin); err != nil {
+		if p := findCommandPath("caddy"); p != "" {
+			bin = p
+		} else {
+			return fmt.Errorf("caddy reload: no caddy binary found")
+		}
+	}
+	cmd := exec.Command(bin, "reload", "--config", paths.CaddyfilePath, "--adapter", "caddyfile") // #nosec G204 — fixed args
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("caddy reload: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

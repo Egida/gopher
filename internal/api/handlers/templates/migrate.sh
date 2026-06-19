@@ -17,6 +17,15 @@ set -e
 HOST_URL="{{.HostURL}}"
 TOKEN="$1"
 
+# Consolidated /etc/gopher origin layout. The agent's own config goes here
+# directly; the rathole client.toml is edited wherever it currently lives
+# (legacy /etc/rathole on an already-bootstrapped machine), and the 0.2.1 agent
+# relocates it under /etc/gopher on its first boot.
+AGENT_DIR="/etc/gopher/agent"
+AGENT_CFG="$AGENT_DIR/config.env"
+CLIENT_CFG="/etc/gopher/rathole/client.toml"
+[ -f "$CLIENT_CFG" ] || CLIENT_CFG="/etc/rathole/client.toml"
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "ERROR: must run as root. Re-run via curl ... | sudo bash -s -- <TOKEN>" >&2
   exit 1
@@ -115,14 +124,14 @@ install -m 0755 -o root -g root /tmp/gopher-agent.new /usr/local/bin/gopher-agen
 rm -f /tmp/gopher-agent.new
 
 # ── 4. Agent config (env file consumed by EnvironmentFile=) ─────────────────
-mkdir -p /etc/gopher-agent
-cat > /etc/gopher-agent/config.env <<EOF
+mkdir -p "$AGENT_DIR"
+cat > "$AGENT_CFG" <<EOF
 GOPHER_AGENT_TOKEN=$AGENT_TOKEN
 GOPHER_AGENT_PORT=$AGENT_PORT
 GOPHER_AGENT_UNIT=rathole-client.service
 EOF
-chmod 640 /etc/gopher-agent/config.env
-chown root:gopher /etc/gopher-agent/config.env
+chmod 640 "$AGENT_CFG"
+chown root:gopher "$AGENT_CFG"
 
 # ── 5. Add agent back-channel to rathole client config ──────────────────────
 # rathole-server already has the matching server-side block (added by the VPS
@@ -130,13 +139,13 @@ chown root:gopher /etc/gopher-agent/config.env
 # allocated AgentRemotePort/AgentRatholeToken on every existing row). All we
 # need on the client is the matching client.services entry pointing local_addr
 # at our agent.
-if [ -f /etc/rathole/client.toml ]; then
+if [ -f "$CLIENT_CFG" ]; then
   awk -v start="# gopher-machine-agent-start: $MACHINE_ID" \
       -v end="# gopher-machine-agent-end: $MACHINE_ID" '
     $0 == start { skip=1; next }
     $0 == end   { skip=0; next }
     !skip       { print }
-  ' /etc/rathole/client.toml > /etc/rathole/client.toml.tmp
+  ' "$CLIENT_CFG" > "$CLIENT_CFG.tmp"
 
   # Ensure the [client.transport] noise block is present. Required for any
   # machine whose original bootstrap predated the noise upgrade — without
@@ -149,9 +158,9 @@ if [ -f /etc/rathole/client.toml ]; then
       /^\[client\.transport\.noise\]/  { skip=1; next }
       skip && /^\[/                    { skip=0 }
       !skip                            { print }
-    ' /etc/rathole/client.toml.tmp > /etc/rathole/client.toml.tmp2
-    mv /etc/rathole/client.toml.tmp2 /etc/rathole/client.toml.tmp
-    cat >> /etc/rathole/client.toml.tmp <<EOF
+    ' "$CLIENT_CFG.tmp" > "$CLIENT_CFG.tmp2"
+    mv "$CLIENT_CFG.tmp2" "$CLIENT_CFG.tmp"
+    cat >> "$CLIENT_CFG.tmp" <<EOF
 
 [client.transport]
 type = "noise"
@@ -161,7 +170,7 @@ remote_public_key = "$NOISE_PUBKEY"
 EOF
   fi
 
-  cat >> /etc/rathole/client.toml.tmp <<EOF
+  cat >> "$CLIENT_CFG.tmp" <<EOF
 
 # gopher-machine-agent-start: $MACHINE_ID
 [client.services.machine-$MACHINE_ID-agent]
@@ -170,11 +179,11 @@ token = "$RATHOLE_TOKEN"
 local_addr = "127.0.0.1:$AGENT_PORT"
 # gopher-machine-agent-end: $MACHINE_ID
 EOF
-  mv /etc/rathole/client.toml.tmp /etc/rathole/client.toml
+  mv "$CLIENT_CFG.tmp" "$CLIENT_CFG"
   # Hand the file over to gopher so the agent can write it directly going
   # forward (config-push uses os.WriteFile, not sudo tee).
-  chown gopher:gopher /etc/rathole/client.toml
-  chmod 0644 /etc/rathole/client.toml
+  chown gopher:gopher "$CLIENT_CFG"
+  chmod 0644 "$CLIENT_CFG"
 fi
 
 # ── 6. systemd unit + service start ─────────────────────────────────────────
@@ -186,7 +195,7 @@ After=network.target
 [Service]
 Type=simple
 User=gopher
-EnvironmentFile=/etc/gopher-agent/config.env
+EnvironmentFile=$AGENT_CFG
 ExecStart=/usr/local/bin/gopher-agent
 Restart=always
 RestartSec=5

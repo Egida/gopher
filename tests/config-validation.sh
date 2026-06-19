@@ -101,18 +101,21 @@ echo "$CADDYFILE" | grep -q "BEGIN CUSTOM CONFIGURATION" \
     || fail "Caddyfile missing custom configuration sentinel"
 pass "Caddyfile has custom configuration sentinel"
 
-# Optional: validate with caddy if installed
-if command -v caddy >/dev/null 2>&1; then
+# Optional: validate with caddy. Prefer the bundled binary the edge supervises
+# (/opt/gopher/bin/caddy); fall back to a caddy on PATH for legacy installs.
+CADDY_BIN=$(command -v caddy 2>/dev/null || true)
+[ -z "$CADDY_BIN" ] && [ -x /opt/gopher/bin/caddy ] && CADDY_BIN=/opt/gopher/bin/caddy
+if [ -n "$CADDY_BIN" ]; then
     TMPFILE=$(mktemp /tmp/test-XXXXX.Caddyfile)
     echo "$CADDYFILE" > "$TMPFILE"
-    if caddy validate --config "$TMPFILE" >/dev/null 2>&1; then
+    if "$CADDY_BIN" validate --config "$TMPFILE" --adapter caddyfile >/dev/null 2>&1; then
         pass "Caddyfile syntax valid (caddy validate)"
     else
         fail "Caddyfile syntax invalid (caddy validate)"
     fi
     rm -f "$TMPFILE"
 else
-    skip "caddy not installed — skipping syntax validation"
+    skip "caddy binary not found — skipping syntax validation"
 fi
 
 # ── Rathole Server Config Test ────────────────────────────────────────────────

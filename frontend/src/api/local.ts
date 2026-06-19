@@ -71,8 +71,8 @@ export const localApi = {
   status: () => client.get<{ data: LocalServiceStatus }>('/local/status').then(r => r.data.data),
   dismissCustomServicesWarning: () =>
     client.post('/local/dismiss-custom-services-warning').then(r => r.data),
-  install: (domain: string, serverHost: string, skipCaddy?: boolean) =>
-    client.post('/local/install', { domain, server_host: serverHost, skip_caddy: Boolean(skipCaddy) }).then(r => r.data),
+  install: (domain: string) =>
+    client.post('/local/install', { domain }).then(r => r.data),
   skip: (domain?: string) => client.post('/local/skip', { domain }).then(r => r.data),
   detectIP: () =>
     client.get<{ data: { ip: string } }>('/local/detect-ip').then(r => r.data.data),

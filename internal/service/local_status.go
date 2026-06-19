@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/embedbin"
+	"github.com/smalex-z/gopher/internal/paths"
 	sshpkg "github.com/smalex-z/gopher/internal/ssh"
 )
 
@@ -123,11 +125,20 @@ func (s *LocalSetupService) Status() (*LocalServiceStatus, error) {
 	if u, err := user.Current(); err == nil {
 		osUser = u.Username
 	}
+	// When gopher supervises caddy/rathole as children there are no
+	// caddy.service/rathole-server.service units to query — report the actual
+	// supervised process state instead, so the dashboard doesn't show them down.
+	caddyInstalled, caddyActive := isCommandAvailable("caddy"), systemctlStatus("caddy")
+	ratholeInstalled, ratholeActive := isCommandAvailable("rathole"), systemctlStatus("rathole-server")
+	if embedbin.Embedded() && os.Getenv("GOPHER_MANAGED") == "1" {
+		caddyInstalled, caddyActive = true, processActive(paths.CaddyBin)
+		ratholeInstalled, ratholeActive = true, processActive(paths.RatholeBin)
+	}
 	status := &LocalServiceStatus{
-		CaddyInstalled:       isCommandAvailable("caddy"),
-		CaddyActive:          systemctlStatus("caddy"),
-		RatholeInstalled:     isCommandAvailable("rathole"),
-		RatholeActive:        systemctlStatus("rathole-server"),
+		CaddyInstalled:       caddyInstalled,
+		CaddyActive:          caddyActive,
+		RatholeInstalled:     ratholeInstalled,
+		RatholeActive:        ratholeActive,
 		Domain:               settings.Domain,
 		ServerHost:           settings.ServerHost,
 		LocalSetupDone:       settings.LocalSetupDone,
@@ -856,6 +867,17 @@ func migrateRatholeConfig(existing string) string {
 	return base + "\n\n" + custom
 }
 
+// processActive reports "active"/"inactive" by whether a process running the
+// given binary path exists. Used for caddy/rathole when gopher supervises them
+// as children — there's no systemd unit to query. pgrep excludes its own PID, so
+// the pattern appearing in pgrep's own argv doesn't self-match.
+func processActive(binPath string) string {
+	if exec.Command("pgrep", "-f", binPath).Run() == nil { // #nosec G204 — fixed path
+		return "active"
+	}
+	return "inactive"
+}
+
 func systemctlStatus(service string) string {
 	out, err := exec.Command("systemctl", "is-active", service).Output() // #nosec G204
 	if err != nil {
@@ -953,7 +975,7 @@ func (s *LocalSetupService) reconcileAllTunnelCaddyBlocks(settings *db.AppSettin
 		reloaded = true
 	}
 	if reloaded {
-		if err := systemctlReload("caddy"); err != nil {
+		if err := caddyReload(); err != nil {
 			log.Printf("reconcile all tunnel caddy: caddy reload failed: %v", err)
 		}
 	}

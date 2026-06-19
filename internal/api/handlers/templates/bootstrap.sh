@@ -5,6 +5,15 @@ TOKEN="$1"
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 
+# Consolidated /etc/gopher origin layout (matches the edge). The agent migrates
+# legacy origins (/etc/rathole, /etc/gopher-agent) onto these on upgrade; fresh
+# bootstraps write them directly.
+RATHOLE_DIR="/etc/gopher/rathole"
+CLIENT_CFG="$RATHOLE_DIR/client.toml"
+VPS_KEY_FILE="$RATHOLE_DIR/vps_key.pub"
+AGENT_DIR="/etc/gopher/agent"
+AGENT_CFG="$AGENT_DIR/config.env"
+
 if [ -z "$TOKEN" ]; then
   echo "Usage: bash bootstrap.sh <TOKEN>"
   echo "Example: curl -s {{.HostURL}}/static/bootstrap.sh | bash -s -- TOKEN"
@@ -28,19 +37,20 @@ echo ""
 # the new bootstrap starts from a known-clean state. The uninstall script
 # notifies the previous server of the deletion (best-effort) and removes all
 # local services/configs/binaries.
-if [ -x /usr/local/bin/gopher-uninstall ] || [ -f /etc/systemd/system/rathole-client.service ] || [ -d /etc/rathole ]; then
+if [ -x /usr/local/bin/gopher-uninstall ] || [ -f /etc/systemd/system/rathole-client.service ] || [ -d /etc/rathole ] || [ -d /etc/gopher/rathole ]; then
   echo "Detected an existing Gopher install on this machine."
   echo "Running gopher-uninstall to clear it before re-bootstrapping..."
   if [ -x /usr/local/bin/gopher-uninstall ]; then
     $SUDO /usr/local/bin/gopher-uninstall || echo "  WARN: prior gopher-uninstall reported errors — continuing"
   else
     # Old/partial install with no uninstaller on disk. Stop services + remove
-    # the directories the new bootstrap will recreate. Best-effort — failures
-    # are logged but don't abort.
+    # the directories the new bootstrap will recreate (both the consolidated
+    # /etc/gopher layout and the legacy /etc/rathole + /etc/gopher-agent one).
+    # Best-effort — failures are logged but don't abort.
     $SUDO systemctl stop gopher-agent rathole-client 2>/dev/null || true
     $SUDO systemctl disable gopher-agent rathole-client 2>/dev/null || true
     $SUDO rm -f /etc/systemd/system/gopher-agent.service /etc/systemd/system/rathole-client.service
-    $SUDO rm -rf /etc/rathole /etc/gopher-agent
+    $SUDO rm -rf /etc/gopher/rathole /etc/gopher/agent /etc/rathole /etc/gopher-agent
     $SUDO rm -f /usr/local/bin/gopher-agent /usr/local/bin/rathole
     $SUDO systemctl daemon-reload 2>/dev/null || true
     echo "  Removed legacy service files and configs"
@@ -69,16 +79,16 @@ handle_sudo_failure() {
   echo "  # then run: curl -s {{.HostURL}}/static/bootstrap.sh | bash -s -- $TOKEN"
   echo ""
   echo "Option 2: Run rathole manually in the foreground (for testing):"
-  echo "  $RATHOLE_BIN /etc/rathole/client.toml"
+  echo "  $RATHOLE_BIN $CLIENT_CFG"
   echo ""
   echo "Option 3: Run rathole in background with nohup:"
-  echo "  nohup $RATHOLE_BIN /etc/rathole/client.toml >/dev/null 2>&1 &"
+  echo "  nohup $RATHOLE_BIN $CLIENT_CFG >/dev/null 2>&1 &"
   echo ""
   echo "Option 4: Run rathole in tmux (persistent session):"
-  echo "  tmux new-session -d -s rathole \"$RATHOLE_BIN /etc/rathole/client.toml\""
+  echo "  tmux new-session -d -s rathole \"$RATHOLE_BIN $CLIENT_CFG\""
   echo ""
   echo "Option 5: Add to crontab for auto-restart on reboot:"
-  echo "  (crontab -l 2>/dev/null; echo \"@reboot $RATHOLE_BIN /etc/rathole/client.toml\") | crontab -"
+  echo "  (crontab -l 2>/dev/null; echo \"@reboot $RATHOLE_BIN $CLIENT_CFG\") | crontab -"
   echo ""
   exit 1
 }
@@ -150,38 +160,32 @@ echo "Installing rathole..."
 if ! command -v rathole &>/dev/null && [ ! -f "$HOME/.local/bin/rathole" ]; then
   ARCH=$(uname -m)
   case "$ARCH" in
-    x86_64)  ARCH_TAG="x86_64-unknown-linux-gnu" ;;
-    aarch64) ARCH_TAG="aarch64-unknown-linux-musl" ;;
-    armv7l)  ARCH_TAG="armv7-unknown-linux-musleabihf" ;;
-    *)       echo "ERROR: Unsupported architecture: $ARCH"; exit 1 ;;
+    x86_64|aarch64|armv7l) ;;
+    *) echo "ERROR: Unsupported architecture: $ARCH"; exit 1 ;;
   esac
-  RATHOLE_URL="https://github.com/__RATHOLE_REPO__/releases/download/__RATHOLE_VERSION__/rathole-${ARCH_TAG}.zip"
-  rm -rf /tmp/rathole-dl
-  mkdir -p /tmp/rathole-dl
-  echo "  Downloading from $RATHOLE_URL ..."
-  if command -v wget &>/dev/null; then
-    wget -q "$RATHOLE_URL" -O /tmp/rathole-dl/rathole.zip || { echo "ERROR: Download failed"; exit 1; }
+  # Fetch the rathole binary the edge bundles for this arch, over the edge's TLS,
+  # instead of downloading a zip from GitHub. The edge serves a raw binary plus a
+  # ".sha256" sidecar we verify (no unzip dependency).
+  RATHOLE_URL="$HOST_URL/static/rathole/${ARCH}"
+  echo "  Downloading rathole from $RATHOLE_URL ..."
+  rm -f /tmp/rathole-dl
+  if command -v curl &>/dev/null; then
+    curl -fsSL "$RATHOLE_URL" -o /tmp/rathole-dl || { echo "ERROR: rathole download failed"; exit 1; }
+    EXPECTED_SUM=$(curl -fsSL "${RATHOLE_URL}.sha256" 2>/dev/null | awk '{print $1}')
   else
-    curl -fsSL "$RATHOLE_URL" -o /tmp/rathole-dl/rathole.zip || { echo "ERROR: Download failed"; exit 1; }
+    wget -q "$RATHOLE_URL" -O /tmp/rathole-dl || { echo "ERROR: rathole download failed"; exit 1; }
+    EXPECTED_SUM=$(wget -qO- "${RATHOLE_URL}.sha256" 2>/dev/null | awk '{print $1}')
   fi
-  if ! command -v unzip &>/dev/null; then
-    if command -v dnf &>/dev/null; then
-      echo "  unzip not found, installing via dnf..."
-      $SUDO dnf install -y -q unzip || { echo "ERROR: unzip not available and could not be installed. Install it manually and re-run."; exit 1; }
-    elif command -v yum &>/dev/null; then
-      echo "  unzip not found, installing via yum..."
-      $SUDO yum install -y -q unzip || { echo "ERROR: unzip not available and could not be installed. Install it manually and re-run."; exit 1; }
-    else
-      echo "  unzip not found, installing via apt..."
-      $SUDO apt-get install -y unzip -qq || { echo "ERROR: unzip not available and could not be installed. Install it manually and re-run."; exit 1; }
+  if [ -n "$EXPECTED_SUM" ] && command -v sha256sum &>/dev/null; then
+    ACTUAL_SUM=$(sha256sum /tmp/rathole-dl | awk '{print $1}')
+    if [ "$ACTUAL_SUM" != "$EXPECTED_SUM" ]; then
+      echo "ERROR: rathole checksum mismatch (expected $EXPECTED_SUM, got $ACTUAL_SUM)"; rm -f /tmp/rathole-dl; exit 1
     fi
+    echo "  rathole checksum verified"
   fi
-  unzip -q /tmp/rathole-dl/rathole.zip -d /tmp/rathole-dl/ || { echo "ERROR: unzip failed"; exit 1; }
-
-  $SUDO cp /tmp/rathole-dl/rathole /usr/local/bin/rathole
-  $SUDO chmod +x /usr/local/bin/rathole
+  $SUDO install -m 0755 /tmp/rathole-dl /usr/local/bin/rathole
   RATHOLE_BIN=/usr/local/bin/rathole
-  rm -rf /tmp/rathole-dl
+  rm -f /tmp/rathole-dl
 else
   RATHOLE_BIN=$(command -v rathole 2>/dev/null || echo "$HOME/.local/bin/rathole")
 fi
@@ -190,8 +194,8 @@ echo "  rathole binary: $RATHOLE_BIN"
 # ── Write rathole client config ───────────────────────────────────────────────
 echo "Writing rathole client config..."
 
-if [ -f "/etc/rathole/client.toml" ]; then
-  echo "WARNING: existing rathole config detected at /etc/rathole/client.toml"
+if [ -f "$CLIENT_CFG" ]; then
+  echo "WARNING: existing rathole config detected at $CLIENT_CFG"
   printf "Continue and overwrite? [y/N]: " >/dev/tty
   read -r OVERWRITE_CONFIRM </dev/tty
   case "$OVERWRITE_CONFIRM" in
@@ -203,13 +207,13 @@ if [ -f "/etc/rathole/client.toml" ]; then
   esac
 fi
 
-$SUDO mkdir -p /etc/rathole || handle_sudo_failure
-echo "$RATHOLE_CONFIG" | $SUDO tee /etc/rathole/client.toml >/dev/null || handle_sudo_failure
-$SUDO chown "$SSH_USER" /etc/rathole/client.toml || handle_sudo_failure
+$SUDO mkdir -p "$RATHOLE_DIR" || handle_sudo_failure
+echo "$RATHOLE_CONFIG" | $SUDO tee "$CLIENT_CFG" >/dev/null || handle_sudo_failure
+$SUDO chown "$SSH_USER" "$CLIENT_CFG" || handle_sudo_failure
 
 # Save VPS public key so the uninstall script can remove it from authorized_keys
 # even without a live connection to the server.
-echo "$VPS_PUBLIC_KEY" | $SUDO tee /etc/rathole/vps_key.pub >/dev/null || true
+echo "$VPS_PUBLIC_KEY" | $SUDO tee "$VPS_KEY_FILE" >/dev/null || true
 
 # ── Install gopher-uninstall script ──────────────────────────────────────────
 echo "Installing gopher-uninstall script..."
@@ -252,7 +256,7 @@ After=network.target
 [Service]
 Type=simple
 User=$SSH_USER
-ExecStart=$RATHOLE_BIN /etc/rathole/client.toml
+ExecStart=$RATHOLE_BIN $CLIENT_CFG
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -279,6 +283,7 @@ if [ -n "$AGENT_TOKEN" ] && [ "$AGENT_TOKEN" != "null" ] && [ -n "$AGENT_PORT" ]
   case "$(uname -m)" in
     x86_64)         AGENT_ARCH_TAG="linux-amd64" ;;
     aarch64|arm64)  AGENT_ARCH_TAG="linux-arm64" ;;
+    armv7l|armv7)   AGENT_ARCH_TAG="linux-armv7" ;;
     *)
       echo "  WARN: unsupported arch $(uname -m); skipping agent install"
       AGENT_ARCH_TAG=""
@@ -302,14 +307,14 @@ if [ -n "$AGENT_TOKEN" ] && [ "$AGENT_TOKEN" != "null" ] && [ -n "$AGENT_PORT" ]
     # /api/machines/self-delete if the binary install fails, so the dashboard
     # stays in sync after a manual cleanup; (b) the migration tool can finish
     # the install later without round-tripping the token through the user.
-    $SUDO mkdir -p /etc/gopher-agent
-    $SUDO tee /etc/gopher-agent/config.env >/dev/null <<EOF || true
+    $SUDO mkdir -p "$AGENT_DIR"
+    $SUDO tee "$AGENT_CFG" >/dev/null <<EOF || true
 GOPHER_AGENT_TOKEN=$AGENT_TOKEN
 GOPHER_AGENT_PORT=$AGENT_PORT
 GOPHER_AGENT_UNIT=rathole-client.service
 EOF
-    $SUDO chmod 640 /etc/gopher-agent/config.env
-    $SUDO chown root:gopher /etc/gopher-agent/config.env
+    $SUDO chmod 640 "$AGENT_CFG"
+    $SUDO chown root:gopher "$AGENT_CFG"
 
     # 4. Download agent binary. We prefer curl (its -fS pair shows transport
     # errors loudly so a failed download stops being a silent skip) and fall
@@ -332,18 +337,18 @@ EOF
       echo "  ERROR: neither curl nor wget is installed — cannot download agent"
     fi
     if [ ! -s /tmp/gopher-agent.new ]; then
-      echo "  WARN: agent download failed — dashboard's migration tool can finish the install later (token stored at /etc/gopher-agent/config.env)"
+      echo "  WARN: agent download failed — dashboard's migration tool can finish the install later (token stored at $AGENT_CFG)"
       rm -f /tmp/gopher-agent.new
     fi
     if [ -s /tmp/gopher-agent.new ]; then
       $SUDO install -m 0755 -o root -g root /tmp/gopher-agent.new /usr/local/bin/gopher-agent
       rm -f /tmp/gopher-agent.new
 
-      # 5. Hand /etc/rathole/client.toml to gopher so the agent can write
-      # config-push directly without sudo. rathole-client (running as
-      # $SSH_USER) keeps reading via mode 0644.
-      $SUDO chown gopher:gopher /etc/rathole/client.toml
-      $SUDO chmod 0644 /etc/rathole/client.toml
+      # 5. Hand the client.toml to gopher so the agent can write config-push
+      # directly without sudo. rathole-client (running as $SSH_USER) keeps
+      # reading via mode 0644.
+      $SUDO chown gopher:gopher "$CLIENT_CFG"
+      $SUDO chmod 0644 "$CLIENT_CFG"
 
       # 6. systemd unit + service start. User=gopher, not $SSH_USER.
       $SUDO tee /etc/systemd/system/gopher-agent.service >/dev/null <<EOF || true
@@ -354,7 +359,7 @@ After=network.target
 [Service]
 Type=simple
 User=gopher
-EnvironmentFile=/etc/gopher-agent/config.env
+EnvironmentFile=$AGENT_CFG
 ExecStart=/usr/local/bin/gopher-agent
 Restart=always
 RestartSec=5
@@ -382,6 +387,6 @@ fi
 echo ""
 echo "=== Bootstrap complete! ==="
 echo "Machine '$MACHINE_NAME' registered as '$SSH_USER'. Tunnel port: $TUNNEL_PORT"
-echo "Rathole config: /etc/rathole/client.toml"
+echo "Rathole config: $CLIENT_CFG"
 echo "Service: sudo systemctl status rathole-client"
 echo "The server will SSH back through the tunnel to verify connectivity."

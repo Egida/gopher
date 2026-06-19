@@ -132,6 +132,11 @@ func runServer(args []string) {
 		// creates it via sudo useradd; the next reconcile picks it up.
 		localSvc.EnsureJumpboxUser()
 		localSvc.ReconcileAuthorizedKeys()
+		// Migrate a legacy edge (apt Caddy, /etc/rathole, separate units) onto the
+		// /etc/gopher layout BEFORE the reconcile below — so the reconcile reads the
+		// migrated config (preserving custom blocks) and Caddy's certs are moved
+		// before the supervised Caddy starts. No-op on fresh/already-migrated edges.
+		migrateEdgeLayoutIfManaged()
 		// Re-derive /etc/rathole/server.toml from the DB on every boot. Catches
 		// drift introduced by DB restore from backup, partial writes, or a crash
 		// between a tunnel/machine row delete and the disk reconcile that would
@@ -147,6 +152,13 @@ func runServer(args []string) {
 		go func() {
 			if err := localSvc.MigrateRatholeNoise(); err != nil {
 				log.Printf("startup: rathole noise migration: %v", err)
+			}
+			// Move the rathole transport host off the bare apex onto
+			// router.<domain> so the apex can be repointed without dropping
+			// tunnels. No-op once migrated / on fresh installs. Runs after the
+			// noise migration so a single reconnect cycle carries both changes.
+			if err := localSvc.MigrateServerHostToRouter(); err != nil {
+				log.Printf("startup: server-host migration: %v", err)
 			}
 		}()
 	} else {
@@ -193,6 +205,9 @@ func runServer(args []string) {
 	// /static/ goes through the chi router (bootstrap.sh, etc.). ServeMux uses
 	// longest-prefix match, so the agents handler wins for that subtree.
 	mux.Handle("/static/agents/", http.StripPrefix("/static/agents/", agentsHandler()))
+	// /static/rathole/<uname> serves the bundled rathole binary to bootstrapping
+	// origins (embedded builds only); falls through to 404 otherwise.
+	mux.Handle("/static/rathole/", http.StripPrefix("/static/rathole/", ratholeHandler()))
 	mux.Handle("/static/", router)
 	// Top-level liveness probe. Lives outside the chi /api group so external
 	// monitors can hit a stable canonical path without auth. ServeMux's
@@ -228,6 +243,15 @@ func runServer(args []string) {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	// Bring up bundled caddy/rathole under gopher's own supervisor, if this is
+	// an embedded build whose consolidated config is in place. Returns nil
+	// (no-op) for dev/legacy builds where systemd still manages them — see
+	// startBundledChildren for the safety interlocks.
+	sup, supErr := startBundledChildren()
+	if supErr != nil {
+		log.Printf("Warning: bundled child startup failed: %v", supErr)
+	}
+
 	// Run the server in a goroutine so the main thread can wait on signals
 	// and trigger a graceful drain. Without this, SIGTERM (sent by
 	// `systemctl stop gopher` and the upgrade flow) would kill in-flight
@@ -249,6 +273,14 @@ func runServer(args []string) {
 		log.Fatalf("Server failed: %v", err)
 	case sig := <-sigCh:
 		log.Printf("received %s, draining...", sig)
+	}
+
+	// Stop supervised children first. Under systemd's default control-group
+	// KillMode, caddy/rathole receive SIGTERM directly at the same instant as
+	// gopher; stopping the supervisor now cancels its restart loops so it
+	// doesn't try to respawn a child that systemd is tearing down.
+	if sup != nil {
+		sup.Stop()
 	}
 
 	// Give in-flight HTTP requests up to 25s to drain (systemd's default

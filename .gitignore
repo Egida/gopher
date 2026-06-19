@@ -34,3 +34,9 @@ coverage.out
 
 # Temporary files
 /tmp/
+
+# Fetched embedded binaries (populated by scripts/fetch-deps.sh, embedded via go:embed).
+# Ignore everything in bin/ except the committed .gitkeep that keeps the dir
+# present for go:embed on fresh checkouts.
+internal/embedbin/bin/*
+!internal/embedbin/bin/.gitkeep

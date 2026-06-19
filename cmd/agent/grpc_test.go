@@ -129,7 +129,7 @@ func TestGRPC_UninstallMissingScript(t *testing.T) {
 
 func TestGRPC_GetRatholeConfigMissingFile(t *testing.T) {
 	if _, err := os.Stat(clientTomlPath); err == nil {
-		t.Skip("real /etc/rathole/client.toml present; cannot exercise missing-file branch")
+		t.Skip("real " + clientTomlPath + " present; cannot exercise missing-file branch")
 	}
 	addr := startTestAgent(t, "secret")
 	client := dialAgent(t, addr, "secret")

@@ -37,12 +37,17 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	agentpb "github.com/smalex-z/gopher/internal/agentpb"
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 const (
 	// agentVersion is the agent build version. It is bumped manually and is
 	// intentionally independent of the server's tag-injected version.
-	agentVersion = "0.2.0"
+	//
+	// 0.2.1: consolidate origin config under /etc/gopher (client.toml +
+	// config.env), migrated in place on first boot. No wire-protocol change, so
+	// protocolVersion is unchanged.
+	agentVersion = "0.2.1"
 
 	// protocolVersion is the wire-compatibility contract between server and
 	// agent. The server gates compatibility on this integer, NOT on the semver
@@ -69,9 +74,15 @@ func loadConfig() config {
 	if u := os.Getenv("GOPHER_AGENT_UNIT"); u != "" {
 		c.UnitName = u
 	}
-	// Optional config file at /etc/gopher-agent/config.env (KEY=value lines).
-	// Useful when systemd EnvironmentFile is preferred over inline Environment=.
-	if data, err := os.ReadFile("/etc/gopher-agent/config.env"); err == nil {
+	// Optional config file (KEY=value lines). Useful when systemd
+	// EnvironmentFile is preferred over inline Environment=. Prefer the
+	// consolidated /etc/gopher/agent/config.env, falling back to the legacy
+	// /etc/gopher-agent/config.env for origins not yet migrated.
+	data, err := os.ReadFile(paths.AgentConfigEnv)
+	if err != nil {
+		data, err = os.ReadFile(paths.LegacyAgentConfigEnv)
+	}
+	if err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
@@ -111,10 +122,20 @@ func main() {
 		return
 	}
 
+	// One-time relocation of legacy origins onto the /etc/gopher layout. Runs
+	// before loadConfig so the env file is read from its final location; a no-op
+	// once migrated or on a fresh 0.2.1 bootstrap.
+	migrateOriginLayout()
+
 	cfg := loadConfig()
 	if cfg.Token == "" {
 		log.Fatal("GOPHER_AGENT_TOKEN is required (env var or /etc/gopher-agent/config.env)")
 	}
+
+	// Local self-healing watchdog: keeps rathole-client alive even when its
+	// config is broken and the server can't reach in (the control channel rides
+	// the very tunnel that's down). Runs independently of the gRPC surface.
+	go ratholeRecoveryLoop(cfg.UnitName)
 
 	srv := &agentServer{cfg: cfg, startedAt: time.Now()}
 
@@ -308,11 +329,11 @@ func rootDiskSpace() (free, total uint64, err error) {
 
 // ─── rathole-config push ─────────────────────────────────────────────────────
 //
-// The agent runs as the SSH user (set in bootstrap), and bootstrap chowns
-// /etc/rathole/client.toml to that user, so direct file I/O works without sudo.
+// The agent runs as the gopher user (set in bootstrap), and bootstrap chowns
+// the client.toml to that user, so direct file I/O works without sudo.
 
 const (
-	clientTomlPath        = "/etc/rathole/client.toml"
+	clientTomlPath        = paths.RatholeClientConfig
 	maxRatholeConfigBytes = 1 << 20 // 1 MiB — generous but bounded
 )
 

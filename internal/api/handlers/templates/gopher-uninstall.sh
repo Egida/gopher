@@ -12,11 +12,17 @@
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 
-CONFIG_FILE="/etc/rathole/client.toml"
-VPS_KEY_FILE="/etc/rathole/vps_key.pub"
 INSTALL_PATH="/usr/local/bin/gopher-uninstall"
 HOST_URL="{{.HostURL}}"
-AGENT_CONFIG="/etc/gopher-agent/config.env"
+
+# Consolidated /etc/gopher layout with a fall back to the legacy paths, so this
+# works on both migrated and un-migrated machines.
+CONFIG_FILE="/etc/gopher/rathole/client.toml"
+[ -f "$CONFIG_FILE" ] || CONFIG_FILE="/etc/rathole/client.toml"
+VPS_KEY_FILE="/etc/gopher/rathole/vps_key.pub"
+[ -f "$VPS_KEY_FILE" ] || VPS_KEY_FILE="/etc/rathole/vps_key.pub"
+AGENT_CONFIG="/etc/gopher/agent/config.env"
+[ -f "$AGENT_CONFIG" ] || AGENT_CONFIG="/etc/gopher-agent/config.env"
 
 # Remove a marker-delimited section from a file.
 # Usage: remove_section <file> <start_marker> <end_marker>
@@ -166,14 +172,17 @@ $SUDO rm -f /etc/systemd/system/rathole-client.service 2>/dev/null || true
 $SUDO systemctl daemon-reload 2>/dev/null || true
 
 echo "Removing rathole config..."
-$SUDO rm -rf /etc/rathole 2>/dev/null || true
+$SUDO rm -rf /etc/gopher/rathole /etc/rathole 2>/dev/null || true
 
 echo "Removing rathole binary..."
 $SUDO rm -f /usr/local/bin/rathole 2>/dev/null || true
 
 echo "Removing gopher-agent binary and config..."
 $SUDO rm -f /usr/local/bin/gopher-agent 2>/dev/null || true
-$SUDO rm -rf /etc/gopher-agent 2>/dev/null || true
+$SUDO rm -rf /etc/gopher/agent /etc/gopher-agent 2>/dev/null || true
+# Drop the /etc/gopher tree if our subdirs were all it held (origins only ever
+# put rathole/ + agent/ there); ignore failure if anything else remains.
+$SUDO rmdir /etc/gopher 2>/dev/null || true
 
 # Remove the dedicated gopher system user. `userdel` fails if processes are
 # still owned by the user, so it must run AFTER stopping the agent service.

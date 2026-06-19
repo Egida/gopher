@@ -83,7 +83,9 @@ export default function NetworkMapPage() {
   })
   const domainIP = domainIPData?.ip ?? ''
   const routerIP = routerIPData?.ip ?? ''
-  const displayHost = domainIP && routerIP && domainIP === routerIP ? domain : (routerHost || domain)
+  // The edge transport host is the backend's ServerHost (defaults to
+  // router.<domain>); the IP queries above stay only to annotate the map node.
+  const displayHost = localStatus?.server_host || routerHost || domain
 
   const netInfoResults = useQueries({
     queries: machines.map(m => ({

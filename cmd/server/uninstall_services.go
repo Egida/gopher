@@ -4,86 +4,95 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 func resetCaddyManagedConfig() error {
-	const caddyPath = "/etc/caddy/Caddyfile"
-	if _, err := os.Stat(caddyPath); err != nil {
+	caddyfile := paths.CaddyfilePath
+	if _, err := os.Stat(caddyfile); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to access Caddyfile: %w", err)
 	}
-
-	backupPath := caddyPath + ".gopher-backup"
-	if err := backupFile(caddyPath, backupPath); err != nil {
+	if err := backupFile(caddyfile, caddyfile+".gopher-backup"); err != nil {
 		return fmt.Errorf("failed to backup Caddyfile: %w", err)
 	}
-	if err := runPythonScript(stripCaddyPython, caddyPath, ""); err != nil {
-		return err
-	}
 
-	if systemctlPath, err := exec.LookPath("systemctl"); err == nil {
-		runCommandBestEffort(systemctlPath, "reload", "caddy")
+	// Gopher-managed routing lives entirely in conf.d/gopher-*.caddy (separate
+	// files) plus the import line in the Caddyfile; the user's own config is the
+	// custom-marker block. So the clean reset is: keep only the custom block and
+	// delete the managed conf.d files — no parsing of the Caddyfile, and a
+	// hand-added <sub>.<domain> block inside the custom section is preserved
+	// verbatim (the old block-scanning could nick it).
+	data, err := os.ReadFile(caddyfile)
+	if err != nil {
+		return fmt.Errorf("failed to read Caddyfile: %w", err)
+	}
+	if err := os.WriteFile(caddyfile, []byte(caddyCustomBlock(string(data))), 0644); err != nil {
+		return fmt.Errorf("failed to rewrite Caddyfile: %w", err)
+	}
+	managed, _ := filepath.Glob(filepath.Join(paths.CaddyConfDir, "gopher-*.caddy"))
+	for _, f := range managed {
+		_ = os.Remove(f)
 	}
 	return nil
 }
 
+// caddyCustomBlock returns the user's config from between the custom-config
+// markers, or the whole file unchanged if the markers are absent (so nothing is
+// ever lost).
+func caddyCustomBlock(content string) string {
+	const begin = "# ===== BEGIN CUSTOM CONFIGURATION ====="
+	const end = "# ===== END CUSTOM CONFIGURATION ====="
+	b := strings.Index(content, begin)
+	e := strings.Index(content, end)
+	if b == -1 || e == -1 || e < b {
+		return content
+	}
+	return strings.TrimSpace(content[b+len(begin):e]) + "\n"
+}
+
 func removeCaddyCompletely() error {
-	if systemctlPath, err := exec.LookPath("systemctl"); err == nil {
-		runCommandBestEffort(systemctlPath, "stop", "caddy")
-		runCommandBestEffort(systemctlPath, "disable", "caddy")
-	}
-	if aptGetPath, err := exec.LookPath("apt-get"); err == nil {
-		runCommandBestEffort(aptGetPath, "purge", "-y", "caddy")
-	}
-	if err := os.RemoveAll("/etc/caddy"); err != nil {
-		return fmt.Errorf("failed to remove /etc/caddy: %w", err)
+	// caddy is bundled into the gopher binary and supervised as a child — there's
+	// no apt package or caddy.service to remove. Drop its config tree; certs in
+	// /var/lib/gopher/caddy go with the data-directory removal.
+	caddyDir := filepath.Join(paths.ConfigDir, "caddy")
+	if err := os.RemoveAll(caddyDir); err != nil {
+		return fmt.Errorf("failed to remove %s: %w", caddyDir, err)
 	}
 	return nil
 }
 
 func resetRatholeManagedConfig() error {
-	const ratholePath = "/etc/rathole/server.toml"
+	ratholePath := paths.RatholeConfig
 	if _, err := os.Stat(ratholePath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to access rathole config: %w", err)
 	}
-
-	backupPath := ratholePath + ".gopher-backup"
-	if err := backupFile(ratholePath, backupPath); err != nil {
+	if err := backupFile(ratholePath, ratholePath+".gopher-backup"); err != nil {
 		return fmt.Errorf("failed to backup rathole config: %w", err)
 	}
+	// rathole keeps managed entries and the custom block in the SAME file (no
+	// conf.d split), so we still strip by markers. No reload kick — rathole is a
+	// gopher child and gopher is being uninstalled.
 	if err := runPythonScript(stripRatholePython, ratholePath); err != nil {
 		return err
-	}
-
-	if pkillPath, err := exec.LookPath("pkill"); err == nil {
-		if exec.Command(pkillPath, "-HUP", "-x", "rathole").Run() == nil {
-			return nil
-		}
-	}
-	if systemctlPath, err := exec.LookPath("systemctl"); err == nil {
-		runCommandBestEffort(systemctlPath, "restart", "rathole-server")
 	}
 	return nil
 }
 
 func removeRatholeCompletely() error {
-	if systemctlPath, err := exec.LookPath("systemctl"); err == nil {
-		runCommandBestEffort(systemctlPath, "stop", "rathole-server")
-		runCommandBestEffort(systemctlPath, "disable", "rathole-server")
-	}
-	_, _ = removeFileIfExists("/etc/systemd/system/rathole-server.service")
-	if systemctlPath, err := exec.LookPath("systemctl"); err == nil {
-		runCommandBestEffort(systemctlPath, "daemon-reload")
-	}
-	_, _ = removeFileIfExists("/usr/local/bin/rathole")
-	if err := os.RemoveAll("/etc/rathole"); err != nil {
-		return fmt.Errorf("failed to remove /etc/rathole: %w", err)
+	// rathole is bundled into the gopher binary and supervised — no
+	// rathole-server.service and no /usr/local/bin/rathole. Just drop its config.
+	ratholeDir := filepath.Join(paths.ConfigDir, "rathole")
+	if err := os.RemoveAll(ratholeDir); err != nil {
+		return fmt.Errorf("failed to remove %s: %w", ratholeDir, err)
 	}
 	return nil
 }
@@ -109,95 +118,6 @@ func runPythonScript(script string, args ...string) error {
 	}
 	return nil
 }
-
-const stripCaddyPython = `import sys, re
-
-path = sys.argv[1]
-domain = sys.argv[2] if len(sys.argv) > 2 else ""
-
-BEGIN = "# ===== BEGIN CUSTOM CONFIGURATION ====="
-END   = "# ===== END CUSTOM CONFIGURATION ====="
-
-with open(path) as fh:
-    content = fh.read()
-
-if not domain:
-    m = re.search(r'^router\.(\S+)\s*\{', content, re.MULTILINE)
-    if m:
-        domain = m.group(1)
-
-def remove_block(text, host_prefix):
-    lines  = text.split("\n")
-    result = []
-    depth  = 0
-    skip   = False
-    for line in lines:
-        stripped = line.strip()
-        if not skip and stripped.startswith(host_prefix) and stripped.endswith("{"):
-            skip  = True
-            depth = 1
-            continue
-        if skip:
-            depth += line.count("{") - line.count("}")
-            if depth <= 0:
-                skip = False
-            continue
-        result.append(line)
-    return "\n".join(result)
-
-user_lines = []
-if BEGIN in content and END in content:
-    b_idx        = content.index(BEGIN)
-    e_idx        = content.index(END) + len(END)
-    section_body = content[b_idx + len(BEGIN) : content.index(END)]
-    raw_lines    = section_body.split("\n")
-
-    skip_comments = {
-        "# Everything below this line will NOT be overwritten on local setup.",
-        "# Add any custom Caddy directives or site blocks here.",
-        "# Everything below this line will NOT be overwritten.",
-        "# Add your own Caddy site blocks here.",
-    }
-
-    if domain:
-        tunnel_header_re = re.compile(r'^[\w\-\*]+\.' + re.escape(domain) + r'\s*\{$')
-        filtered = []
-        depth = 0
-        skip  = False
-        for line in raw_lines:
-            stripped = line.strip()
-            if stripped in skip_comments:
-                continue
-            if not skip and tunnel_header_re.match(stripped):
-                skip  = True
-                depth = 1
-                continue
-            if skip:
-                depth += line.count("{") - line.count("}")
-                if depth <= 0:
-                    skip = False
-                continue
-            filtered.append(line)
-        user_lines = filtered
-    else:
-        user_lines = [l for l in raw_lines if l.strip() not in skip_comments]
-
-    before  = content[:b_idx].rstrip()
-    after   = content[e_idx:].lstrip("\n")
-    content = (before + "\n" + after) if after else (before + "\n")
-
-if domain:
-    content = remove_block(content, f"router.{domain}")
-
-preserved = "\n".join(user_lines).strip()
-if preserved:
-    content = content.rstrip("\n") + "\n\n" + preserved + "\n"
-
-content = content.strip() + "\n"
-
-with open(path, "w") as fh:
-    fh.write(content)
-`
 
 const stripRatholePython = `import sys, re
 

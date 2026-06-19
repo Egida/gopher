@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/paths"
 	sshpkg "github.com/smalex-z/gopher/internal/ssh"
 )
 
@@ -168,7 +169,6 @@ func (s *DeployService) logWriter() io.Writer {
 	return &hubWriter{hub: s.Hub}
 }
 
-
 func (s *DeployService) DeployClient(machine *db.Machine) error {
 	w := s.logWriter()
 
@@ -216,7 +216,7 @@ func (s *DeployService) DeployClient(machine *db.Machine) error {
 	}
 	defer client.Close()
 
-	existingConfig, _ := client.Execute("cat /etc/rathole/client.toml 2>/dev/null || cat ~/.config/rathole/client.toml 2>/dev/null")
+	existingConfig, _ := client.Execute("cat " + paths.RatholeClientConfig + " 2>/dev/null || cat " + paths.LegacyRatholeClientConfig + " 2>/dev/null || cat ~/.config/rathole/client.toml 2>/dev/null")
 	clientConfig, err := mergeClientManagedConfig(existingConfig, machine, tunnels, ratholeHostFromSettings(settings), settings.RatholeNoisePubKey)
 	if err != nil {
 		fmt.Fprintf(w, "ERROR: Failed to generate client config: %v\n", err)

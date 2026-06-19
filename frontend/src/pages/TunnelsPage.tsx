@@ -97,23 +97,10 @@ export default function TunnelsPage() {
   const domain = localStatus?.domain
   const routingEnabled = Boolean(domain)
 
-  const { data: domainIPData } = useQuery({
-    queryKey: ['resolve-ip', domain ?? ''],
-    queryFn: () => localApi.resolveIP(domain!),
-    enabled: !!domain,
-    staleTime: 10 * 60 * 1000,
-  })
-  const { data: routerIPData } = useQuery({
-    queryKey: ['resolve-ip', domain ? `router.${domain}` : ''],
-    queryFn: () => localApi.resolveIP(`router.${domain}`),
-    enabled: !!domain,
-    staleTime: 10 * 60 * 1000,
-  })
-  const domainIP = domainIPData?.ip ?? ''
-  const routerIP = routerIPData?.ip ?? ''
-  const displayHost = domain
-    ? (domainIP && routerIP && domainIP === routerIP ? domain : `router.${domain}`)
-    : undefined
+  // Raw-TCP tunnel host shown to operators. Source of truth is the backend's
+  // ServerHost (defaults to router.<domain>) — the exact host baked into each
+  // client's remote_addr — rather than guessing apex-vs-router by resolved IP.
+  const displayHost = localStatus?.server_host || (domain ? `router.${domain}` : undefined)
 
   // Deep-link entry from MachinesPage ("/tunnels?machine=..."). Mirrors
   // openAddModal's nextPort() prefetch so the rathole-port input lands
@@ -449,7 +436,7 @@ export default function TunnelsPage() {
               const localPortConflict = !isEdit && form.local_port > 0 && form.machine_id !== '' &&
                 tunnels.some(t => t.machine_id === form.machine_id && t.local_port === form.local_port)
               const canCreate = form.machine_id !== '' && form.name.trim() !== '' &&
-                form.rathole_port > 0 && !serverPortConflict && !localPortConflict && !createMutation.isPending
+                form.local_port > 0 && form.rathole_port > 0 && !serverPortConflict && !localPortConflict && !createMutation.isPending
               const canSave = form.name.trim() !== '' && !updateMutation.isPending
               return (
             <>
@@ -509,7 +496,7 @@ export default function TunnelsPage() {
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-500 font-mono shrink-0">localhost:</span>
-                  <input type="number" value={form.local_port} onChange={e => setForm(f => ({ ...f, local_port: Number(e.target.value) }))}
+                  <input type="number" value={form.local_port || ''} onChange={e => setForm(f => ({ ...f, local_port: Number(e.target.value) }))}
                     className={`flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 border ${
                       localPortConflict
                         ? 'border-amber-400 focus:ring-amber-400 bg-amber-50'

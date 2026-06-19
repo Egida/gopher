@@ -2,11 +2,11 @@
   <img src="frontend/public/gopher_banner.png" alt="Gopher" width="440">
 </p>
 
-**Public router for private services.** A self-hosted edge server that exposes homelab services to the internet without opening ports.
+**A self-hosted edge platform with built-in tunneling.** One Go binary on a $5 VPS gives you what Cloudflare gives you — TLS termination, automatic HTTPS, hidden origin IPs, multi-region routing, and bot detection at the edge — except the edge is yours end-to-end. No third party in your TLS perimeter, no SaaS deciding what your service is allowed to do.
 
-Gopher turns your VPS into a personal edge server. Services running on private networks (homelab NAS, university servers, Raspberry Pi) become accessible via clean URLs with automatic HTTPS — while keeping your home IP and origin machines completely hidden.
+The built-in tunnel is the unlock: **any device with outbound internet becomes publicly reachable.** A Raspberry Pi in your closet, a laptop on coffee-shop wifi, a server with no public IP — no port forwarding, no NAT traversal, no static IP. And because you own the edge, you own every decision made there: routing, auth, rate limiting, request filtering.
 
-**Self-hosted alternative to ngrok and Cloudflare Tunnel.**
+In short, it's a **public router for your private services** — the same idea as port forwarding, just on a VPS instead of your home router. That's what makes it work even where forwarding can't: behind CGNAT, locked-down campus/corporate networks, or an ISP that blocks inbound ports.
 
 **Example:**
 ```
@@ -38,7 +38,7 @@ vault.yourdomain.com  → Bitwarden on Raspberry Pi (behind NAT)
 
 > **📺 Prefer to watch?** [**12-minute video install guide**](https://www.youtube.com/watch?v=KYpr61Ak9FE) — a full walkthrough from VPS to first tunnel.
 
-Gopher ships as a single self-contained binary for Linux. No runtime dependencies — Caddy and rathole are downloaded automatically during setup.
+Gopher ships as a single self-contained binary for Linux. No runtime dependencies — Caddy and rathole are embedded in the binary.
 
 ### Requirements
 
@@ -232,6 +232,12 @@ Components managed by Gopher:
 - **rathole** — Secure tunnel client/server
 - **Web UI** — Tunnel and machine management
 
+Caddy and rathole are **bundled into the single `gopher` binary** (`go:embed`) and
+extracted + run as **child processes that Gopher supervises** — no separate apt
+package, no downloads at install, no extra systemd units. The whole edge lives
+under `/etc/gopher` (config) and `/var/lib/gopher` (state + certs): one artifact
+to install, two directories to back up.
+
 Similar to Cloudflare, but:
 
 - ✅ You own the infrastructure
@@ -327,28 +333,33 @@ media.example.com    → Friend's shared Plex
 
 ## Comparison
 
-Gopher sits between DIY solutions (manual tunnels + nginx configs) and commercial services (ngrok, Cloudflare, Tailscale):
+Most tools here are *one half* of the stack: ngrok and Tailscale are tunnels with no programmable
+edge; Caddy and Traefik are edges that can't reach behind NAT. Gopher is the combination — a
+tunnel **and** an edge you own — the category Cloudflare productized, except self-hosted, so no third
+party ever sits in front of your services.
 
 |  | Gopher | ngrok | Cloudflare Tunnel | Tailscale Funnel | Port Forwarding |
 |---|--------|-------|-------------------|------------------|-----------------|
-| **Cost** | Free† | Free* / $8–20/mo | Free* | Free* / $6/mo | None |
+| **Self-hosted** | ✅ | ❌ | ❌ | ❌ | N/A |
+| **Who can read your requests** | ✅ Only you | ❌ ngrok | ❌ Cloudflare | ✅ Only you | ✅ Only you |
+| **Edge request filtering** (bot detection) | ✅ | 💰 Paid | ✅ | ❌ | ❌ |
+| **Multi-region routing** | ✅ | 💰 Paid | ✅ | ⚠️ Limited | ❌ |
 | **Origin IP hidden** | ✅ | ✅ | ✅ | ✅ | ❌ Exposes home IP |
-| **Traffic privacy** | ✅ You control | ❌ ngrok sees all | ❌ CF sees all | ❌ Tailscale sees all | ✅ |
-| **File size limits** | ✅ None | ⚠️ Plan-dependent | ❌ 100MB (free) | ⚠️ Plan-dependent | ✅ None |
+| **Unmetered bandwidth** | ✅ | ❌ Metered | ✅ | ⚠️ Relay-limited | ✅ |
+| **Upload size cap** | ✅ None | ✅ None | ❌ 100MB (free) | ✅ None | ✅ None |
 | **Custom domain** | ✅ | 💰 Paid only | ⚠️ CF DNS required | ❌ `*.ts.net` only | ✅ |
 | **Any DNS registrar** | ✅ | ✅ | ❌ Must use CF DNS | ❌ Tailscale subdomain | ✅ |
 | **Permanent URLs** | ✅ | ❌ Ephemeral (free) | ✅ | ✅ | ✅ |
 | **Tunnel count** | ✅ Unlimited | ❌ 1 (free) | ✅ Unlimited | ✅ Unlimited | ✅ Unlimited |
-| **Protocol support** | HTTP / TCP / UDP | HTTP / TCP | HTTP only** | HTTPS only*** | All |
+| **Protocol support** | HTTP / TCP / UDP | HTTP / TCP | HTTP/HTTPS** | HTTPS only*** | All |
 | **Works behind NAT/CGNAT** | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **Automatic HTTPS** | ✅ | ✅ | ✅ | ✅ | ❌ Manual |
-| **Self-hosted** | ✅ | ❌ | ❌ | ❌ | N/A |
 | **No vendor lock-in** | ✅ | ❌ | ❌ | ❌ | ✅ |
 
-† Gopher is free and open source. You need a machine with a public IP — a VPS (~$3–5/mo) is the easiest option, but any server with a public IP works, including one you already own.  
 \* Free with significant limitations  
-\*\* Non-HTTP requires Cloudflare Spectrum (enterprise pricing)  
-\*\*\* Tailscale Funnel is HTTPS-only on port 443; no TCP/UDP, no raw port exposure
+\*\* Cloudflare Tunnel serves HTTP/HTTPS to anonymous visitors; raw TCP needs Spectrum (Pro+), UDP needs Enterprise  
+\*\*\* Tailscale Funnel is HTTPS-only on port 443; no TCP/UDP, no raw port exposure  
+Cloudflare and ngrok terminate your TLS on their servers, so they can read your requests.
 
 ---
 

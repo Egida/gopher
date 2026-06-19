@@ -3,6 +3,8 @@ package service
 import (
 	"strings"
 	"testing"
+
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 func TestBuildManagedCaddyfile_UsesImportLayout(t *testing.T) {
@@ -22,7 +24,7 @@ custom.example.com {
 `
 
 	content := buildManagedCaddyfile(existing, "")
-	if !strings.Contains(content, "import /etc/caddy/conf.d/*.caddy") {
+	if !strings.Contains(content, "import "+paths.CaddyConfDir+"/*.caddy") {
 		t.Fatalf("expected import-based layout, got:\n%s", content)
 	}
 	if strings.Contains(content, "router.example.com {") {
@@ -44,7 +46,7 @@ photos.example.com {
 `
 	content := buildManagedCaddyfile(existing, "")
 
-	if !strings.Contains(content, "import /etc/caddy/conf.d/*.caddy") {
+	if !strings.Contains(content, "import "+paths.CaddyConfDir+"/*.caddy") {
 		t.Fatalf("expected import-based layout, got:\n%s", content)
 	}
 	if !strings.Contains(content, "# ===== BEGIN CUSTOM CONFIGURATION =====") || !strings.Contains(content, "# ===== END CUSTOM CONFIGURATION =====") {
@@ -56,10 +58,30 @@ photos.example.com {
 }
 
 func TestManagedCaddyPaths(t *testing.T) {
-	if got := managedRouterCaddyPath(); got != "/etc/caddy/conf.d/gopher-router.caddy" {
-		t.Fatalf("unexpected router path: %s", got)
+	if got, want := managedRouterCaddyPath(), paths.CaddyConfDir+"/gopher-router.caddy"; got != want {
+		t.Fatalf("router path = %s, want %s", got, want)
 	}
-	if got := managedTunnelCaddyPath("abc123"); got != "/etc/caddy/conf.d/gopher-tunnel-abc123.caddy" {
-		t.Fatalf("unexpected tunnel path: %s", got)
+	if got, want := managedTunnelCaddyPath("abc123"), paths.CaddyConfDir+"/gopher-tunnel-abc123.caddy"; got != want {
+		t.Fatalf("tunnel path = %s, want %s", got, want)
+	}
+}
+
+// Regression for the gopherden migration: a legacy/non-gopher Caddyfile carrying
+// its own `import .../conf.d/*.caddy` line must not have that import survive in
+// the custom section — else it re-imports a stale conf.d and caddy crash-loops
+// with "ambiguous site definition".
+func TestBuildManagedCaddyfile_StripsLegacyConfDImport(t *testing.T) {
+	existing := "import /etc/caddy/conf.d/*.caddy\n\n" +
+		"gopherden.org {\n\troot * /var/www/gopherden\n\tfile_server\n}\n"
+	out := buildManagedCaddyfile(existing, "")
+
+	if !strings.Contains(out, "import "+paths.CaddyConfDir+"/*.caddy") {
+		t.Fatalf("expected the managed conf.d import, got:\n%s", out)
+	}
+	if strings.Contains(out, "import /etc/caddy/conf.d") {
+		t.Fatalf("legacy conf.d import leaked into the custom section:\n%s", out)
+	}
+	if !strings.Contains(out, "gopherden.org {") {
+		t.Fatalf("user's custom site block was dropped:\n%s", out)
 	}
 }
