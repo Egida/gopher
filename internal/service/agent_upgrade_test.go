@@ -33,6 +33,11 @@ func waitForCalls(t *testing.T, get func() int32, want int32) {
 }
 
 func TestMaybeAutoUpgradeAgent_FiresAndThrottles(t *testing.T) {
+	// Deterministic: no jitter so the first attempt fires immediately.
+	prev := agentUpgradeJitterFn
+	agentUpgradeJitterFn = func() time.Duration { return 0 }
+	defer func() { agentUpgradeJitterFn = prev }()
+
 	up := &fakeUpgrader{}
 	h := NewHealthService(false)
 	h.SetAgentUpgrader(up)
@@ -44,18 +49,56 @@ func TestMaybeAutoUpgradeAgent_FiresAndThrottles(t *testing.T) {
 		t.Errorf("upgraded wrong machine: %v", got)
 	}
 
-	// A second call within the cooldown must NOT fire again.
+	// A second call within the retry interval must NOT fire again.
 	h.maybeAutoUpgradeAgent(m, "test again")
 	time.Sleep(100 * time.Millisecond)
 	if got := up.calls.Load(); got != 1 {
-		t.Errorf("cooldown breached: expected 1 call, got %d", got)
+		t.Errorf("retry interval breached: expected 1 call, got %d", got)
 	}
 
-	// Past the cooldown, it fires again.
+	// Past the retry interval, it fires again.
 	h.mu.Lock()
-	h.lastAgentUpgrade["m1"] = time.Now().Add(-agentUpgradeCooldown - time.Minute)
+	h.agentUpgrades["m1"].last = time.Now().Add(-agentUpgradeMaxRetry - time.Minute)
 	h.mu.Unlock()
-	h.maybeAutoUpgradeAgent(m, "after cooldown")
+	h.maybeAutoUpgradeAgent(m, "after backoff")
+	waitForCalls(t, up.calls.Load, 2)
+}
+
+func TestAgentUpgradeRetryInterval_BacksOff(t *testing.T) {
+	// Untouched / first attempt: no wait.
+	if got := agentUpgradeRetryInterval(0); got != 0 {
+		t.Errorf("attempts=0 should be 0, got %v", got)
+	}
+	// 90s, 180s, 360s, … doubling each attempt.
+	if got := agentUpgradeRetryInterval(1); got != agentUpgradeMinRetry {
+		t.Errorf("attempts=1 = %v, want %v", got, agentUpgradeMinRetry)
+	}
+	if got := agentUpgradeRetryInterval(2); got != 2*agentUpgradeMinRetry {
+		t.Errorf("attempts=2 = %v, want %v", got, 2*agentUpgradeMinRetry)
+	}
+	// Never exceeds the ceiling.
+	if got := agentUpgradeRetryInterval(20); got != agentUpgradeMaxRetry {
+		t.Errorf("attempts=20 = %v, want ceiling %v", got, agentUpgradeMaxRetry)
+	}
+}
+
+func TestClearAgentUpgradeState_ResetsBackoff(t *testing.T) {
+	prev := agentUpgradeJitterFn
+	agentUpgradeJitterFn = func() time.Duration { return 0 }
+	defer func() { agentUpgradeJitterFn = prev }()
+
+	up := &fakeUpgrader{}
+	h := NewHealthService(false)
+	h.SetAgentUpgrader(up)
+
+	m := &db.Machine{ID: "m1", Name: "alpha"}
+	h.maybeAutoUpgradeAgent(m, "first")
+	waitForCalls(t, up.calls.Load, 1)
+
+	// Agent reached target → state cleared → an immediate later bump fires again
+	// without waiting out the backoff.
+	h.clearAgentUpgradeState("m1")
+	h.maybeAutoUpgradeAgent(m, "new bump")
 	waitForCalls(t, up.calls.Load, 2)
 }
 

@@ -357,25 +357,25 @@ export default function MachinesPage() {
                       <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
                       <td className="px-4 py-3">
                         {(() => {
-                          // Only offer an actionable install/upgrade when we can VERIFY the
-                          // need right now: no agent at all, or the agent is reachable AND
-                          // reporting outdated (e.g. v0.1.0). When the machine is offline the
-                          // agent_outdated flag can be stale, so we don't trust it — we just
-                          // report the last-known version instead of a bogus "Upgrade agent".
+                          // There is no manual "upgrade" anymore: from v0.2.0 the agent
+                          // self-updates with full privileges, and the server auto-rolls any
+                          // reachable agent reporting outdated. So a reachable+outdated agent
+                          // is shown as "Updating…" (status, not a button). The only manual
+                          // action left is a first-time INSTALL on an agentless machine —
+                          // there's no agent there yet to update itself. Offline machines
+                          // report their last-known version (the outdated flag may be stale).
                           const reachable = m.status === 'connected' || m.status === 'degraded'
                           const showInstall = !m.agent_installed
-                          const showUpgrade = m.agent_installed && m.agent_outdated && reachable
-                          if (showInstall || showUpgrade) {
+                          const updating = m.agent_installed && m.agent_outdated && reachable
+                          if (showInstall) {
                             return (
                               <button
                                 onClick={() => installAgentMutation.mutate(m.id)}
                                 disabled={installAgentMutation.isPending && installAgentMutation.variables === m.id}
                                 title={
-                                  showUpgrade
-                                    ? `Agent is outdated${m.agent_version ? ` (v${m.agent_version})` : ''} — upgrade it`
-                                    : m.agent_install_error
-                                      ? `Last error: ${m.agent_install_error}`
-                                      : 'Install gopher-agent on this machine'
+                                  m.agent_install_error
+                                    ? `Last error: ${m.agent_install_error}`
+                                    : 'Install gopher-agent on this machine'
                                 }
                                 className={`px-2 py-1 text-xs rounded border flex items-center gap-1 transition-colors ${
                                   m.agent_install_error
@@ -384,13 +384,21 @@ export default function MachinesPage() {
                                 }`}
                               >
                                 {installAgentMutation.isPending && installAgentMutation.variables === m.id
-                                  ? <><Loader2 size={11} className="animate-spin" /> {showUpgrade ? 'Upgrading…' : 'Installing…'}</>
-                                  : showUpgrade
-                                    ? <>Upgrade agent</>
-                                    : m.agent_install_error
-                                      ? <>Retry install</>
-                                      : <>Install agent</>}
+                                  ? <><Loader2 size={11} className="animate-spin" /> Installing…</>
+                                  : m.agent_install_error
+                                    ? <>Retry install</>
+                                    : <>Install agent</>}
                               </button>
+                            )
+                          }
+                          if (updating) {
+                            return (
+                              <span
+                                title={`Agent self-updating${m.agent_version ? ` from v${m.agent_version}` : ''} to the current version…`}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium border text-blue-700 bg-blue-50 border-blue-200"
+                              >
+                                <Loader2 size={11} className="animate-spin" /> Updating…
+                              </span>
                             )
                           }
                           // Installed and either current, or offline — report the last-known version.

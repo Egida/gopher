@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -12,6 +13,21 @@ import (
 
 	"github.com/smalex-z/gopher/internal/db"
 )
+
+// agentUpgradeAttempt is the per-machine auto-upgrade bookkeeping: when we last
+// triggered an upgrade and how many consecutive triggers it's taken without the
+// agent reaching the target version (drives the retry backoff).
+type agentUpgradeAttempt struct {
+	last     time.Time
+	attempts int
+}
+
+// agentUpgradeJitterFn returns the random pre-trigger delay for a first upgrade
+// attempt, spreading a fleet-wide bump over time. A var so tests can make it
+// deterministic.
+var agentUpgradeJitterFn = func() time.Duration {
+	return time.Duration(rand.Int63n(int64(agentUpgradeJitter)))
+}
 
 // HealthService runs an in-process loop that polls every connected machine's
 // gopher-agent every healthCheckInterval, records the result, and triggers
@@ -52,9 +68,11 @@ type HealthService struct {
 	// the install over the server's SSH connection (no operator paste). Set by
 	// the cmd/server wiring; nil disables auto-upgrade (e.g. in tests).
 	agentUpgrader AgentUpgrader
-	// lastAgentUpgrade throttles auto-upgrade attempts per machine so a durably
-	// broken upgrade doesn't re-fire every health tick.
-	lastAgentUpgrade map[string]time.Time
+	// agentUpgrades tracks per-machine auto-upgrade attempts (last trigger time +
+	// consecutive-attempt count) so the retry interval can back off and a durably
+	// broken upgrade doesn't re-fire every health tick. Cleared once the agent
+	// reports current, so a future version bump starts fresh.
+	agentUpgrades map[string]*agentUpgradeAttempt
 
 	// streams holds the cancel func for each agent machine's live WatchStatus
 	// consumer. Agent machines are watched via a persistent stream (push), not
@@ -86,8 +104,17 @@ type AgentUpgrader interface {
 // version is auto-upgraded.
 const targetAgentVersion = "0.2.1"
 
-// agentUpgradeCooldown throttles repeated auto-upgrade attempts per machine.
-const agentUpgradeCooldown = 10 * time.Minute
+// Auto-upgrade pacing. The retry interval per machine starts short and backs
+// off on each successive failed attempt, so an upgrade that's merely in-flight
+// (download + restart + the origin migration take ~a minute) retries quickly,
+// while a durably-broken agent backs off instead of re-firing every tick. The
+// trigger is also jittered so a fleet-wide bump doesn't make every agent pull
+// the ~30 MB binary off the edge — and restart rathole — at the same instant.
+const (
+	agentUpgradeMinRetry = 90 * time.Second  // first retry; doubles each attempt
+	agentUpgradeMaxRetry = 10 * time.Minute  // backoff ceiling
+	agentUpgradeJitter   = 120 * time.Second // max random pre-trigger delay
+)
 
 const (
 	healthCheckInterval       = 60 * time.Second
@@ -98,15 +125,15 @@ const (
 
 func NewHealthService(autoRecover bool) *HealthService {
 	return &HealthService{
-		interval:         healthCheckInterval,
-		purgeInterval:    healthCheckPurgeFrequency,
-		purgeOlderThan:   time.Duration(healthCheckRetentionDays) * 24 * time.Hour,
-		autoRecover:      autoRecover,
-		stopCh:           make(chan struct{}),
-		lastRecovery:     map[string]time.Time{},
-		lastStatus:       map[string]string{},
-		lastAgentUpgrade: map[string]time.Time{},
-		streams:          map[string]context.CancelFunc{},
+		interval:       healthCheckInterval,
+		purgeInterval:  healthCheckPurgeFrequency,
+		purgeOlderThan: time.Duration(healthCheckRetentionDays) * 24 * time.Hour,
+		autoRecover:    autoRecover,
+		stopCh:         make(chan struct{}),
+		lastRecovery:   map[string]time.Time{},
+		lastStatus:     map[string]string{},
+		agentUpgrades:  map[string]*agentUpgradeAttempt{},
+		streams:        map[string]context.CancelFunc{},
 	}
 }
 
@@ -151,22 +178,67 @@ func (s *HealthService) maybeAutoUpgradeAgent(m *db.Machine, reason string) {
 		return
 	}
 	s.mu.Lock()
-	if time.Since(s.lastAgentUpgrade[m.ID]) < agentUpgradeCooldown {
+	st := s.agentUpgrades[m.ID]
+	if st != nil && time.Since(st.last) < agentUpgradeRetryInterval(st.attempts) {
 		s.mu.Unlock()
 		return
 	}
-	s.lastAgentUpgrade[m.ID] = time.Now()
+	if st == nil {
+		st = &agentUpgradeAttempt{}
+		s.agentUpgrades[m.ID] = st
+	}
+	st.last = time.Now()
+	st.attempts++
+	attempt := st.attempts
 	s.mu.Unlock()
+
+	// Jitter the trigger so a fleet-wide bump doesn't make every agent hit the
+	// edge for the binary — and bounce rathole — in the same instant. Only the
+	// first attempt is jittered; retries are already spread by the backoff.
+	jitter := time.Duration(0)
+	if attempt == 1 {
+		jitter = agentUpgradeJitterFn()
+	}
 
 	machine := *m // copy: the pointer's fields may change under the next poll
 	go goSafe("health.autoUpgradeAgent", func() {
-		log.Printf("health: auto-upgrading agent on %s (%s)", machine.Name, reason)
+		if jitter > 0 {
+			time.Sleep(jitter)
+		}
+		log.Printf("health: auto-upgrading agent on %s (attempt %d, %s)", machine.Name, attempt, reason)
 		if err := s.agentUpgrader.UpgradeAgent(&machine); err != nil {
 			log.Printf("health: auto-upgrade agent on %s failed: %v", machine.Name, err)
 			return
 		}
-		log.Printf("health: auto-upgrade agent on %s complete", machine.Name)
+		log.Printf("health: auto-upgrade agent on %s triggered", machine.Name)
 	})
+}
+
+// agentUpgradeRetryInterval is the minimum gap before re-triggering an upgrade
+// on a machine that has already had `attempts` triggers without reaching the
+// target version: 90s, 180s, 360s, … capped at agentUpgradeMaxRetry. Short
+// first retries cover the in-flight case (the agent is mid-download/restart);
+// the backoff keeps a durably-broken agent from re-firing every tick.
+func agentUpgradeRetryInterval(attempts int) time.Duration {
+	if attempts <= 0 {
+		return 0
+	}
+	d := agentUpgradeMinRetry
+	for i := 1; i < attempts; i++ {
+		d *= 2
+		if d >= agentUpgradeMaxRetry {
+			return agentUpgradeMaxRetry
+		}
+	}
+	return d
+}
+
+// clearAgentUpgradeState drops a machine's upgrade bookkeeping once it reports
+// current, so a later version bump isn't gated by the previous roll's backoff.
+func (s *HealthService) clearAgentUpgradeState(machineID string) {
+	s.mu.Lock()
+	delete(s.agentUpgrades, machineID)
+	s.mu.Unlock()
 }
 
 // isAgentProtocolSkew reports whether a failed agent RPC looks like the server
@@ -542,6 +614,8 @@ func (s *HealthService) applyAgentStatus(m *db.Machine, status *AgentStatus, sub
 	_ = db.SetMachineAgentOutdated(m.ID, outdated)
 	if outdated {
 		s.maybeAutoUpgradeAgent(m, fmt.Sprintf("agent %s older than %s", status.AgentVersion, targetAgentVersion))
+	} else {
+		s.clearAgentUpgradeState(m.ID) // reached target — reset backoff for any future bump
 	}
 }
 
