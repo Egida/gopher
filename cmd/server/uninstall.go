@@ -49,56 +49,43 @@ func runUninstall(args []string) error {
 		runCommandBestEffort(systemctlPath, "disable", cfg.serviceName)
 	}
 
-	// Determine what to remove
-	resetCaddy := *skipPrompts
-	removeCaddy := *skipPrompts
-	resetRathole := *skipPrompts
-	removeRathole := *skipPrompts
-
+	// Caddy + rathole are bundled into the gopher binary and supervised as child
+	// processes — there is no separate service, package, or binary to uninstall.
+	// Stopping gopher (above) already stopped them, and removing the install dir
+	// below deletes the extracted /opt/gopher/bin/{caddy,rathole}. The runtime
+	// always goes with gopher; the only decision left is their *config* under
+	// /etc/gopher.
+	//
+	// Default keeps the operator's custom config blocks and strips only the
+	// Gopher-managed entries (each file is backed up to *.gopher-backup first), so
+	// a hand-rolled Caddy site or rathole service survives for a future standalone
+	// setup. Opting in removes the whole /etc/gopher config tree.
+	removeConfig := *skipPrompts
 	if !*skipPrompts {
 		var err error
-		resetCaddy, err = promptYesNo("Reset Caddyfile to remove Gopher-managed changes? [y/N]: ")
+		removeConfig, err = promptYesNo("Remove Gopher's Caddy + rathole config under /etc/gopher entirely? Default keeps your custom config blocks (Gopher-managed entries are stripped either way). [y/N]: ")
 		if err != nil {
-			return fmt.Errorf("failed reading Caddy reset confirmation: %w", err)
-		}
-		removeCaddy, err = promptYesNo("Remove Caddy completely (service, package, config)? [y/N]: ")
-		if err != nil {
-			return fmt.Errorf("failed reading Caddy removal confirmation: %w", err)
-		}
-		resetRathole, err = promptYesNo("Reset rathole server config to remove Gopher-managed changes? [y/N]: ")
-		if err != nil {
-			return fmt.Errorf("failed reading rathole reset confirmation: %w", err)
-		}
-		removeRathole, err = promptYesNo("Remove rathole completely (service, binary, config)? [y/N]: ")
-		if err != nil {
-			return fmt.Errorf("failed reading rathole removal confirmation: %w", err)
+			return fmt.Errorf("failed reading config removal confirmation: %w", err)
 		}
 	}
 
-	caddySummary := "Caddy left unchanged"
-	if removeCaddy {
+	var configSummary string
+	if removeConfig {
 		if err := removeCaddyCompletely(); err != nil {
 			return err
 		}
-		caddySummary = "Caddy removed completely"
-	} else if resetCaddy {
-		if err := resetCaddyManagedConfig(); err != nil {
-			return err
-		}
-		caddySummary = "Caddyfile reset to remove Gopher-managed blocks"
-	}
-
-	ratholeSummary := "rathole left unchanged"
-	if removeRathole {
 		if err := removeRatholeCompletely(); err != nil {
 			return err
 		}
-		ratholeSummary = "rathole removed completely"
-	} else if resetRathole {
+		configSummary = "Caddy + rathole config removed entirely (/etc/gopher)"
+	} else {
+		if err := resetCaddyManagedConfig(); err != nil {
+			return err
+		}
 		if err := resetRatholeManagedConfig(); err != nil {
 			return err
 		}
-		ratholeSummary = "rathole config reset to remove Gopher-managed blocks"
+		configSummary = "Caddy + rathole config kept: custom blocks preserved, Gopher-managed entries stripped (originals backed up to *.gopher-backup)"
 	}
 
 	servicePath := filepath.Join("/etc/systemd/system", cfg.serviceName+".service")
@@ -120,6 +107,22 @@ func runUninstall(args []string) error {
 	// passwordless-sudo setup so no elevated privileges remain after uninstall.
 	if err := removeBootstrapSudoers(); err != nil {
 		return fmt.Errorf("failed to remove bootstrap sudoers files: %w", err)
+	}
+
+	// Remove the fail2ban jail + filter the wizard installed. These are purely
+	// Gopher-managed (like the sudoers and the unit), so they go unconditionally;
+	// reload fail2ban so it drops the now-absent jail. All best-effort — fail2ban
+	// may not be installed.
+	fail2banRemoved := false
+	for _, f := range []string{"/etc/fail2ban/jail.d/gopher.conf", "/etc/fail2ban/filter.d/gopher-auth.conf"} {
+		if removed, _ := removeFileIfExists(f); removed {
+			fail2banRemoved = true
+		}
+	}
+	if fail2banRemoved {
+		if f2bPath, err := exec.LookPath("fail2ban-client"); err == nil {
+			runCommandBestEffort(f2bPath, "reload")
+		}
 	}
 
 	targetBinary := filepath.Join(cfg.installDir, "gopher")
@@ -155,23 +158,36 @@ func runUninstall(args []string) error {
 		dataSummary = fmt.Sprintf("Data removed: %s", cfg.dataDir)
 	}
 
+	// The install creates two system users: the service user (cfg.user, e.g.
+	// "gopher") and the privilege-free jumpbox user ("gopher-jump"). Both are
+	// Gopher's footprint, so a single decision covers them — keeping a dangling
+	// gopher-jump after the rest is gone was a leftover we hit in testing.
 	userSummary := fmt.Sprintf("System user not found: %s", cfg.user)
-	if systemUserExists(cfg.user) {
+	if systemUserExists(cfg.user) || systemUserExists(defaultJumpboxUser) {
 		removeUser := *skipPrompts
 		if !*skipPrompts {
 			var err error
-			removeUser, err = promptYesNo(fmt.Sprintf("Remove system user %q? [y/N]: ", cfg.user))
+			removeUser, err = promptYesNo(fmt.Sprintf("Remove system users %q and %q? [y/N]: ", cfg.user, defaultJumpboxUser))
 			if err != nil {
 				return fmt.Errorf("failed reading user removal confirmation: %w", err)
 			}
 		}
 		if removeUser {
-			if err := removeSystemUser(cfg.user); err != nil {
-				return err
+			var removed []string
+			for _, u := range []string{cfg.user, defaultJumpboxUser} {
+				if !systemUserExists(u) {
+					continue
+				}
+				if err := removeSystemUser(u); err != nil {
+					return err
+				}
+				removed = append(removed, u)
 			}
-			userSummary = fmt.Sprintf("System user removed: %s", cfg.user)
+			if len(removed) > 0 {
+				userSummary = "System users removed: " + strings.Join(removed, ", ")
+			}
 		} else {
-			userSummary = fmt.Sprintf("System user kept: %s", cfg.user)
+			userSummary = fmt.Sprintf("System users kept: %s, %s", cfg.user, defaultJumpboxUser)
 		}
 	}
 
@@ -180,8 +196,7 @@ func runUninstall(args []string) error {
 	fmt.Printf("Sudoers removed: %s\n", sudoersPath)
 	fmt.Printf("Binary removed: %s\n", targetBinary)
 	fmt.Println(dataSummary)
-	fmt.Println(caddySummary)
-	fmt.Println(ratholeSummary)
+	fmt.Println(configSummary)
 	fmt.Println(userSummary)
 	return nil
 }

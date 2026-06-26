@@ -85,3 +85,53 @@ func TestBuildManagedCaddyfile_StripsLegacyConfDImport(t *testing.T) {
 		t.Fatalf("user's custom site block was dropped:\n%s", out)
 	}
 }
+
+// Regression for the uninstall leftover: extracting the operator's config must
+// return ONLY their site blocks — no managed header, boilerplate comments,
+// conf.d import, or stray/stacked "# Gopher managed Caddyfile" lines an old
+// reconcile may have accumulated inside the custom section.
+func TestExtractUserCaddyConfig_StripsAllGopherBoilerplate(t *testing.T) {
+	dirty := "# Gopher managed Caddyfile\n" +
+		"import " + paths.CaddyConfDir + "/*.caddy\n\n" +
+		caddyCustomBeginMark + "\n" +
+		"# Gopher managed Caddyfile\n" + // stray, stacked
+		"# Gopher managed Caddyfile\n" +
+		"# Everything below this line will NOT be overwritten.\n" +
+		"# Add your own Caddy site blocks here.\n" +
+		"import /etc/caddy/conf.d/*.caddy\n" +
+		"gopherden.org {\n\troot * /var/www/gopherden\n\tfile_server\n}\n" +
+		caddyCustomEndMark + "\n"
+
+	got := ExtractUserCaddyConfig(dirty)
+
+	if strings.Contains(got, "# Gopher managed Caddyfile") {
+		t.Fatalf("stray managed header leaked into user config:\n%s", got)
+	}
+	if strings.Contains(got, "Everything below this line") || strings.Contains(got, "Add your own Caddy") {
+		t.Fatalf("boilerplate comments leaked:\n%s", got)
+	}
+	if strings.Contains(got, "import ") {
+		t.Fatalf("conf.d import leaked:\n%s", got)
+	}
+	if !strings.Contains(got, "gopherden.org {") || !strings.Contains(got, "file_server") {
+		t.Fatalf("user's site block was dropped:\n%s", got)
+	}
+}
+
+// A Caddyfile with no custom markers was never Gopher-wrapped (operator's own
+// pre-existing config) — it must come back verbatim, not get blanked.
+func TestExtractUserCaddyConfig_NoMarkersReturnedVerbatim(t *testing.T) {
+	own := "example.com {\n\treverse_proxy localhost:8080\n}\n"
+	if got := ExtractUserCaddyConfig(own); got != own {
+		t.Fatalf("non-gopher Caddyfile altered:\n--- in ---\n%s\n--- out ---\n%s", own, got)
+	}
+}
+
+// An all-Gopher Caddyfile (no operator config) extracts to empty, so uninstall
+// removes the file instead of leaving an empty Gopher-owned one.
+func TestExtractUserCaddyConfig_GopherOnlyIsEmpty(t *testing.T) {
+	gopherOnly := buildManagedCaddyfile("", "")
+	if got := strings.TrimSpace(ExtractUserCaddyConfig(gopherOnly)); got != "" {
+		t.Fatalf("expected empty extraction for gopher-only file, got:\n%s", got)
+	}
+}

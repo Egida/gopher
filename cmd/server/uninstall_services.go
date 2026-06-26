@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/smalex-z/gopher/internal/paths"
+	"github.com/smalex-z/gopher/internal/service"
 )
 
 func resetCaddyManagedConfig() error {
@@ -24,15 +25,21 @@ func resetCaddyManagedConfig() error {
 
 	// Gopher-managed routing lives entirely in conf.d/gopher-*.caddy (separate
 	// files) plus the import line in the Caddyfile; the user's own config is the
-	// custom-marker block. So the clean reset is: keep only the custom block and
-	// delete the managed conf.d files — no parsing of the Caddyfile, and a
-	// hand-added <sub>.<domain> block inside the custom section is preserved
-	// verbatim (the old block-scanning could nick it).
+	// custom-marker block. The clean reset keeps ONLY the user's config —
+	// service.ExtractUserCaddyConfig strips every trace of Gopher (managed header,
+	// boilerplate comments, the conf.d import, and any stray/stacked managed
+	// headers an old reconcile may have accumulated inside the custom block) —
+	// and deletes the managed conf.d files.
 	data, err := os.ReadFile(caddyfile)
 	if err != nil {
 		return fmt.Errorf("failed to read Caddyfile: %w", err)
 	}
-	if err := os.WriteFile(caddyfile, []byte(caddyCustomBlock(string(data))), 0644); err != nil {
+	userConfig := service.ExtractUserCaddyConfig(string(data))
+	if strings.TrimSpace(userConfig) == "" {
+		// Nothing of the operator's left — drop the file entirely rather than
+		// leaving an empty Gopher-owned Caddyfile behind.
+		_ = os.Remove(caddyfile)
+	} else if err := os.WriteFile(caddyfile, []byte(userConfig), 0644); err != nil {
 		return fmt.Errorf("failed to rewrite Caddyfile: %w", err)
 	}
 	managed, _ := filepath.Glob(filepath.Join(paths.CaddyConfDir, "gopher-*.caddy"))
@@ -40,20 +47,6 @@ func resetCaddyManagedConfig() error {
 		_ = os.Remove(f)
 	}
 	return nil
-}
-
-// caddyCustomBlock returns the user's config from between the custom-config
-// markers, or the whole file unchanged if the markers are absent (so nothing is
-// ever lost).
-func caddyCustomBlock(content string) string {
-	const begin = "# ===== BEGIN CUSTOM CONFIGURATION ====="
-	const end = "# ===== END CUSTOM CONFIGURATION ====="
-	b := strings.Index(content, begin)
-	e := strings.Index(content, end)
-	if b == -1 || e == -1 || e < b {
-		return content
-	}
-	return strings.TrimSpace(content[b+len(begin):e]) + "\n"
 }
 
 func removeCaddyCompletely() error {
@@ -83,6 +76,15 @@ func resetRatholeManagedConfig() error {
 	// gopher child and gopher is being uninstalled.
 	if err := runPythonScript(stripRatholePython, ratholePath); err != nil {
 		return err
+	}
+	// The non-custom remainder ([server], [server.transport] noise) is Gopher's,
+	// not the operator's. If there's no custom-services block left, drop the file
+	// entirely rather than leave a Gopher-owned server.toml (with our noise key)
+	// behind.
+	if data, err := os.ReadFile(ratholePath); err == nil {
+		if !strings.Contains(string(data), "# ===== BEGIN CUSTOM CONFIGURATION =====") {
+			_ = os.Remove(ratholePath)
+		}
 	}
 	return nil
 }

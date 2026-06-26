@@ -93,6 +93,55 @@ var caddyCustomHeaderLines = []string{
 	"# Add your own Caddy site blocks here.",
 }
 
+// managedCaddyCommentLines are Gopher-emitted comment lines that must be
+// stripped from any extracted custom body — a superset of caddyCustomHeaderLines
+// that also includes the top-of-file managed header. The managed header lives
+// OUTSIDE the markers when we write it, but a legacy/whole-file absorb can scoop
+// it into the custom section, and once there it's sticky: every reconsruct
+// re-wraps it, stacking copies. We never write these into the custom block, so
+// dropping every occurrence is always safe and self-heals old accumulation.
+var managedCaddyCommentLines = append([]string{
+	"# Gopher managed Caddyfile",
+}, caddyCustomHeaderLines...)
+
+// ExtractUserCaddyConfig returns the operator's own Caddy configuration from a
+// Gopher Caddyfile: the content between the custom-config markers with all
+// Gopher boilerplate stripped (managed header, "add your own blocks" comments,
+// the managed conf.d import). A file with no markers was never Gopher-wrapped,
+// so the whole thing is the user's and returned as-is. Shared with the uninstall
+// flow so "reset" leaves exactly the user's config and nothing of Gopher's.
+func ExtractUserCaddyConfig(content string) string {
+	if !strings.Contains(content, caddyCustomBeginMark) {
+		return content
+	}
+	body := extractCaddyCustomBody(content)
+	body = strings.TrimSpace(stripManagedCaddyImports(body))
+	body = stripManagedCaddyComments(body)
+	if body == "" {
+		return ""
+	}
+	return body + "\n"
+}
+
+// stripManagedCaddyComments drops every line that exactly matches a Gopher
+// managed comment, anywhere in the body — clears stray/stacked headers that a
+// leading-only strip would miss.
+func stripManagedCaddyComments(body string) string {
+	managed := make(map[string]struct{}, len(managedCaddyCommentLines))
+	for _, l := range managedCaddyCommentLines {
+		managed[l] = struct{}{}
+	}
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if _, ok := managed[strings.TrimSpace(line)]; ok {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
 func extractCaddyCustomBody(content string) string {
 	bIdx := strings.Index(content, caddyCustomBeginMark)
 	if bIdx == -1 {
@@ -116,8 +165,8 @@ func extractCaddyCustomBody(content string) string {
 func stripCaddyCustomHeader(s string) string {
 	lines := strings.Split(s, "\n")
 	i := 0
-	headerSet := make(map[string]struct{}, len(caddyCustomHeaderLines))
-	for _, h := range caddyCustomHeaderLines {
+	headerSet := make(map[string]struct{}, len(managedCaddyCommentLines))
+	for _, h := range managedCaddyCommentLines {
 		headerSet[h] = struct{}{}
 	}
 	for i < len(lines) {
