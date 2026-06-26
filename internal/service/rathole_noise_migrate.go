@@ -189,7 +189,7 @@ func (s *LocalSetupService) MigrateRatholeNoise() error {
 	}
 
 	if len(customServices) > 0 {
-		log.Printf("rathole noise migration: detected %d user-managed services in /etc/rathole/server.toml custom block — these need a manual client.toml update with the noise pubkey or they'll fail to reconnect after the server flips:", len(customServices))
+		log.Printf("rathole noise migration: detected %d user-managed services in %s custom block — these need a manual client.toml update with the noise pubkey or they'll fail to reconnect after the server flips:", len(customServices), paths.RatholeConfig)
 		for _, name := range customServices {
 			log.Printf("    [server.services.%s]", name)
 		}

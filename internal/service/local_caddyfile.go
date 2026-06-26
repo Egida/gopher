@@ -29,11 +29,24 @@ func buildRouterCaddyBlock(domain, bindIP string) string {
 	return fmt.Sprintf("router.%s {\n    reverse_proxy localhost:%d\n}\n", domain, dashboardPort)
 }
 
+// caddyAvailable reports whether there's a Caddy we can manage: the bundled
+// binary under /opt/gopher/bin on an embedded/supervised install (which is NOT
+// on PATH), or a caddy on PATH for a dev/manual setup. A bare
+// isCommandAvailable("caddy") misses the supervised binary and makes the
+// reconciles below silently no-op on a clean embedded edge. Mirrors caddyReload's
+// own bundled-then-PATH precedence.
+func caddyAvailable() bool {
+	if _, err := os.Stat(paths.CaddyBin); err == nil {
+		return true
+	}
+	return isCommandAvailable("caddy")
+}
+
 // ReconcileRouterCaddyBlock rewrites the managed router Caddy file to reflect
 // the current dashboardPort and bindIP. Called at startup so binary updates that
 // change the default port don't leave a stale Caddy config pointing at the old port.
 func (s *LocalSetupService) ReconcileRouterCaddyBlock() {
-	if !isCommandAvailable("caddy") {
+	if !caddyAvailable() {
 		return
 	}
 	settings, err := db.GetSettings()
@@ -44,8 +57,8 @@ func (s *LocalSetupService) ReconcileRouterCaddyBlock() {
 		log.Printf("startup: failed to reconcile router Caddy block: %v", err)
 		return
 	}
-	if err := systemctlReloadOrRestart("caddy"); err != nil {
-		log.Printf("startup: caddy reload-or-restart failed: %v", err)
+	if err := caddyReload(); err != nil {
+		log.Printf("startup: caddy reload failed: %v", err)
 	}
 }
 
@@ -265,15 +278,15 @@ func ensureManagedCaddyLayout() error {
 // ReconcileMainCaddyfile rewrites the main Caddyfile global options (e.g.
 // default_bind) to match current settings. Called when bind_ip changes.
 func (s *LocalSetupService) ReconcileMainCaddyfile() {
-	if !isCommandAvailable("caddy") {
+	if !caddyAvailable() {
 		return
 	}
 	if err := ensureManagedCaddyLayout(); err != nil {
 		log.Printf("reconcile main Caddyfile: %v", err)
 		return
 	}
-	if err := systemctlReloadOrRestart("caddy"); err != nil {
-		log.Printf("reconcile main Caddyfile: caddy reload-or-restart failed: %v", err)
+	if err := caddyReload(); err != nil {
+		log.Printf("reconcile main Caddyfile: caddy reload failed: %v", err)
 	}
 }
 
@@ -288,7 +301,7 @@ func (s *LocalSetupService) ReconcileMainCaddyfile() {
 // untouched, the gopher-router.caddy is preserved (its filename has no tunnel
 // ID), and an empty conf.d directory is a no-op.
 func (s *LocalSetupService) ReconcileTunnelCaddyFiles() {
-	if !isCommandAvailable("caddy") {
+	if !caddyAvailable() {
 		return
 	}
 	entries, err := os.ReadDir(caddyManagedDir)
@@ -332,8 +345,8 @@ func (s *LocalSetupService) ReconcileTunnelCaddyFiles() {
 		removed++
 	}
 	if removed > 0 {
-		if err := systemctlReloadOrRestart("caddy"); err != nil {
-			log.Printf("reconcile tunnel caddy files: caddy reload-or-restart failed: %v", err)
+		if err := caddyReload(); err != nil {
+			log.Printf("reconcile tunnel caddy files: caddy reload failed: %v", err)
 		}
 	}
 }

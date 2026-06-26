@@ -39,7 +39,7 @@ function PasswordStep({ onDone }: { onDone: () => void }) {
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
       <div className="flex items-center gap-2 mb-6 text-blue-600">
         <Lock size={18} />
-        <span className="font-semibold text-sm uppercase tracking-wide">Step 1 of 4 — Admin password</span>
+        <span className="font-semibold text-sm uppercase tracking-wide">Step 1 of 5 — Admin password</span>
       </div>
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
@@ -326,7 +326,7 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
     <div className="space-y-3">
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
       <div className="flex items-center gap-2 text-blue-600">
-        <span className="font-semibold text-sm uppercase tracking-wide">Step 2 of 4 — Local services</span>
+        <span className="font-semibold text-sm uppercase tracking-wide">Step 2 of 5 — Local services</span>
       </div>
 
       {/* Lead: the one thing the operator MUST do for any of this to work. */}
@@ -540,7 +540,7 @@ function FirewallStep({ onDone }: { onDone: () => void }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-4">
         <div className="flex items-center gap-2 text-blue-600">
           <ShieldCheck size={18} />
-          <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — Firewall</span>
+          <span className="font-semibold text-sm uppercase tracking-wide">Step 5 of 5 — Firewall</span>
         </div>
         <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
           <CheckCircle2 size={18} className="text-green-600 mt-0.5 shrink-0" />
@@ -580,7 +580,7 @@ function FirewallStep({ onDone }: { onDone: () => void }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-5">
         <div className="flex items-center gap-2 text-blue-600">
           <ShieldCheck size={18} />
-          <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — Firewall</span>
+          <span className="font-semibold text-sm uppercase tracking-wide">Step 5 of 5 — Firewall</span>
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3 text-sm text-amber-900">
@@ -628,7 +628,7 @@ function FirewallStep({ onDone }: { onDone: () => void }) {
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
       <div className="flex items-center gap-2 text-blue-600">
         <Shield size={18} />
-        <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — Firewall</span>
+        <span className="font-semibold text-sm uppercase tracking-wide">Step 5 of 5 — Firewall</span>
       </div>
 
       <p className="text-sm text-gray-600">
@@ -753,7 +753,7 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
         <div className="flex items-center gap-2 text-blue-600">
           <Key size={18} />
-          <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — SSH key</span>
+          <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 5 — SSH key</span>
         </div>
         <p className="text-sm text-gray-600">
           Gopher uses an SSH key pair to connect back into bootstrapped machines through their
@@ -804,7 +804,7 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-5">
         <div className="flex items-center gap-2 text-blue-600">
           <Key size={18} />
-          <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — Key generated</span>
+          <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 5 — Key generated</span>
         </div>
         <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
           <CheckCircle2 size={18} className="text-green-600 mt-0.5 shrink-0" />
@@ -849,7 +849,7 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-5">
       <div className="flex items-center gap-2 text-blue-600">
         <Upload size={18} />
-        <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — Upload SSH key</span>
+        <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 5 — Upload SSH key</span>
       </div>
       <p className="text-sm text-gray-500">Paste your key contents or click Browse to select files.</p>
       <div>
@@ -928,7 +928,7 @@ function Fail2banStep({ onDone }: { onDone: () => void }) {
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
       <div className="flex items-center gap-2 text-blue-600">
         <ShieldBan size={18} />
-        <span className="font-semibold text-sm uppercase tracking-wide">New: fail2ban protection</span>
+        <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 5 — fail2ban</span>
       </div>
 
       <div className="space-y-3 text-sm text-gray-600">

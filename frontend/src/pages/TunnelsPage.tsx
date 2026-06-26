@@ -443,8 +443,8 @@ export default function TunnelsPage() {
             <div className="p-4 space-y-4">
               {!routingEnabled && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
-                  <strong>URL routing is disabled.</strong> Caddy/reverse-proxy setup was skipped, so tunnels are exposed
-                  by server port only.
+                  <strong>URL routing is disabled.</strong> No domain is configured yet, so tunnels are exposed by server
+                  port only. Finish the setup wizard to enable subdomain routing.
                 </div>
               )}
 

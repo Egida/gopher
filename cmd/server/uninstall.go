@@ -49,6 +49,11 @@ func runUninstall(args []string) error {
 		runCommandBestEffort(systemctlPath, "disable", cfg.serviceName)
 	}
 
+	// Undo the firewall takeover: remove gopher's iptables chains/jumps and reset
+	// the INPUT/FORWARD policy to ACCEPT. No-op if gopher never took over the
+	// firewall, so an operator-managed firewall is left untouched.
+	service.TeardownFirewall(os.Stdout)
+
 	// Caddy + rathole are bundled into the gopher binary and supervised as child
 	// processes — there is no separate service, package, or binary to uninstall.
 	// Stopping gopher (above) already stopped them, and removing the install dir
@@ -129,7 +134,13 @@ func runUninstall(args []string) error {
 	if _, err := removeFileIfExists(targetBinary); err != nil {
 		return fmt.Errorf("failed to remove installed binary: %w", err)
 	}
-	_ = os.Remove(cfg.installDir)
+	// RemoveAll, not Remove: the supervisor extracts the bundled caddy + rathole
+	// (+ .version stamps) into <installDir>/bin, so the dir is non-empty and a
+	// plain os.Remove would fail with ENOTEMPTY and leave the extracted edge
+	// binaries behind. Guard the path the same way the data-dir removal does.
+	if err := ensureSafeRemovalPath(cfg.installDir); err == nil {
+		_ = os.RemoveAll(cfg.installDir)
+	}
 
 	// Data dir (database, certs, state) is preserved by default on a bare
 	// uninstall, so uninstall-to-reinstall doesn't silently wipe your setup.
@@ -350,5 +361,9 @@ func removeSystemUser(username string) error {
 	if err != nil {
 		return fmt.Errorf("userdel not found: %w", err)
 	}
-	return runCommand("remove system user "+username, userdelPath, username)
+	// -r removes the user's home dir too. Both gopher and gopher-jump are created
+	// with -m (materialized homes: /opt/gopher and /var/lib/gopher-jump), and the
+	// jumpbox home holds .ssh/authorized_keys with every managed key — without -r
+	// that whole tree (keys included) is orphaned after a full uninstall.
+	return runCommand("remove system user "+username, userdelPath, "-r", username)
 }

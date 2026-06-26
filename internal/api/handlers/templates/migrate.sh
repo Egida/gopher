@@ -103,6 +103,7 @@ ARCH=$(uname -m)
 case "$ARCH" in
   x86_64)         ARCH_TAG=linux-amd64 ;;
   aarch64|arm64)  ARCH_TAG=linux-arm64 ;;
+  armv7l|armv7)   ARCH_TAG=linux-armv7 ;;
   *) echo "ERROR: unsupported arch $ARCH" >&2; exit 1 ;;
 esac
 

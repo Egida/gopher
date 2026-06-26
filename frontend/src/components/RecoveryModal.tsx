@@ -103,7 +103,7 @@ export default function RecoveryModal({ isOpen, onClose, machineID, machineName,
                 <li>
                   <span className="font-medium">Free disk space first</span> if the underlying error
                   mentions <span className="font-mono text-xs">no space left on device</span> — the
-                  script needs ~10 KB free in <span className="font-mono text-xs">/etc/rathole/</span>{' '}
+                  script needs ~10 KB free in <span className="font-mono text-xs">/etc/gopher/rathole/</span>{' '}
                   to rewrite the config.
                 </li>
               </ol>

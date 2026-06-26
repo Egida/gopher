@@ -143,6 +143,10 @@ func (s *MachineService) delete(id string, fromClient bool) (*DeleteResult, erro
 		if err := db.DeleteTunnel(tunnel.ID); err != nil {
 			cleanupErrs = append(cleanupErrs, fmt.Sprintf("delete tunnel %s: %v", tunnel.ID, err))
 		}
+		// Close the firewall port the tunnel opened (gopher-mode gated, no-op
+		// otherwise) — mirrors TunnelService.Delete; without this, deleting a
+		// machine strands every GOPHER_TUNNELS ACCEPT rule it held.
+		RevokeTunnelPort(tunnel.RatholePort, tunnel.Transport)
 		if s.local != nil {
 			if err := s.local.RemoveServiceTunnelCaddy(tunnel); err != nil {
 				cleanupErrs = append(cleanupErrs, fmt.Sprintf("caddy cleanup %s: %v", tunnel.ID, err))
@@ -154,6 +158,8 @@ func (s *MachineService) delete(id string, fromClient bool) (*DeleteResult, erro
 	if err := db.DeleteMachine(id); err != nil {
 		cleanupErrs = append(cleanupErrs, fmt.Sprintf("delete machine: %v", err))
 	}
+	// Close the machine's SSH-tunnel port too (bootstrap opened it via ApplyTunnelPort).
+	RevokeTunnelPort(machine.TunnelPort, "tcp")
 
 	// Single reconcile after all DB deletions — run it regardless of the above so
 	// server.toml converges to what's left (avoids multiple rathole restarts).

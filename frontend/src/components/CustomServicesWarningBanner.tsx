@@ -70,7 +70,7 @@ export default function CustomServicesWarningBanner() {
           </div>
           <p className="text-xs text-amber-800 mt-1">
             Gopher just enabled encrypted rathole transport, but services in{' '}
-            <code className="text-[11px] bg-amber-100 px-1 rounded">/etc/rathole/server.toml</code>'s
+            <code className="text-[11px] bg-amber-100 px-1 rounded">/etc/gopher/rathole/server.toml</code>'s
             custom block are managed by you — their client-side configs need a manual
             <code className="text-[11px] bg-amber-100 px-1 rounded mx-1">[client.transport]</code>
             noise block or they silently stop reconnecting.

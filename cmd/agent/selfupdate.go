@@ -59,8 +59,15 @@ func (s *agentServer) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// linux-amd64 / linux-arm64 — matches the filenames scripts/build.sh produces.
-	binURL := fmt.Sprintf("%s/static/agents/gopher-agent-linux-%s", base, runtime.GOARCH)
+	// Map GOARCH to the release arch tag the build/CI produces. 32-bit ARM
+	// reports GOARCH "arm" but the binary is built+served as "armv7" (GOARM=7),
+	// matching bootstrap.sh — without this remap an armv7 origin would fetch a
+	// gopher-agent-linux-arm that doesn't exist and self-update would 404 forever.
+	archTag := runtime.GOARCH
+	if archTag == "arm" {
+		archTag = "armv7"
+	}
+	binURL := fmt.Sprintf("%s/static/agents/gopher-agent-linux-%s", base, archTag)
 
 	bin, err := download(binURL, maxAgentBinaryBytes)
 	if err != nil {

@@ -149,11 +149,13 @@ func firewallTakeover(logWriter io.Writer) error {
 	// Step 8: Kick Caddy so it retries ACME cert issuance immediately now that
 	// port 80 is open. Without this, Caddy keeps backing off (up to ~minutes)
 	// from earlier failed attempts before the firewall opened.
-	if isCommandAvailable("caddy") {
+	if caddyAvailable() {
 		if settings, sErr := db.GetSettings(); sErr == nil && settings.Domain != "" {
 			fmt.Fprintln(logWriter, "Step 8: Reloading Caddy to retry cert issuance on now-open port 80...")
-			reloadCaddy := append(sudo, "systemctl", "reload", "caddy")
-			if err := exec.Command(reloadCaddy[0], reloadCaddy[1:]...).Run(); err != nil { // #nosec G204
+			// Admin-API reload, not `systemctl reload caddy`: the supervised Caddy
+			// has no systemd unit (the legacy one is masked), so systemctl would
+			// fail and the ACME retry this step exists for would never fire.
+			if err := caddyReload(); err != nil {
 				fmt.Fprintf(logWriter, "  WARN: caddy reload failed: %v\n", err)
 			} else {
 				fmt.Fprintln(logWriter, "  Caddy reloaded ✓ (cert issuance may take ~30s)")
@@ -214,17 +216,17 @@ func firewallDisableConflicting(status *FirewallStatus, logWriter io.Writer, sud
 func firewallInitRules(logWriter io.Writer, sudo []string) error {
 	// All arguments below are hardcoded constants — no user input. #nosec G204
 	steps := [][]string{
-		append(sudo, "iptables", "-F"),                                                                                             // flush rules
-		append(sudo, "iptables", "-X"),                                                                                             // delete user chains
-		append(sudo, "iptables", "-P", "INPUT", "DROP"),                                                                            // default deny incoming
-		append(sudo, "iptables", "-P", "FORWARD", "DROP"),                                                                          // default deny forwarding
-		append(sudo, "iptables", "-P", "OUTPUT", "ACCEPT"),                                                                         // allow outgoing
-		append(sudo, "iptables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT"),                                                        // loopback
-		append(sudo, "iptables", "-A", "INPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"),             // established
-		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "22", "-j", "ACCEPT"),                                      // SSH — never block
-		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"),                                      // HTTP
-		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "443", "-j", "ACCEPT"),                                     // HTTPS
-		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "2333", "-j", "ACCEPT"),                                    // rathole control
+		append(sudo, "iptables", "-F"),                                      // flush rules
+		append(sudo, "iptables", "-X"),                                      // delete user chains
+		append(sudo, "iptables", "-P", "INPUT", "DROP"),                     // default deny incoming
+		append(sudo, "iptables", "-P", "FORWARD", "DROP"),                   // default deny forwarding
+		append(sudo, "iptables", "-P", "OUTPUT", "ACCEPT"),                  // allow outgoing
+		append(sudo, "iptables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT"), // loopback
+		append(sudo, "iptables", "-A", "INPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"), // established
+		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "22", "-j", "ACCEPT"),                          // SSH — never block
+		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"),                          // HTTP
+		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "443", "-j", "ACCEPT"),                         // HTTPS
+		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "2333", "-j", "ACCEPT"),                        // rathole control
 		// Dashboard port (Gopher) is handled via GOPHER_TUNNELS by ApplyDashboardPort, not hardcoded here.
 	}
 	for _, args := range steps {
@@ -578,6 +580,45 @@ func iptablesDeleteRule(chain string, ruleSpec ...string) {
 func firewallChainExists() bool {
 	cmd := exec.Command("sudo", "-n", "iptables", "-L", gopherChain, "-n") // #nosec G204
 	return cmd.Run() == nil
+}
+
+// TeardownFirewall undoes the gopher firewall takeover on uninstall: it removes
+// the GOPHER_TUNNELS/GOPHER_CUSTOM chains + their INPUT jumps and resets the
+// INPUT/FORWARD policies to ACCEPT, so the box is left with a permissive default
+// rather than a DROP policy whose managing rules are gone (which would otherwise
+// silently strand every tunnel port the chain held + an orphaned chain). No-op
+// when the chain doesn't exist (gopher never took over), so it never touches an
+// operator's own firewall. All best-effort — uninstall must not fail on this.
+func TeardownFirewall(logWriter io.Writer) {
+	if logWriter == nil {
+		logWriter = io.Discard
+	}
+	if !isCommandAvailable("iptables") {
+		return
+	}
+	sudo := privilegedCmdPrefix()
+	chk := append(append([]string{}, sudo...), "iptables", "-L", gopherChain, "-n")
+	if exec.Command(chk[0], chk[1:]...).Run() != nil { // #nosec G204 — proof the takeover ran
+		return
+	}
+	fmt.Fprintln(logWriter, "Removing Gopher firewall chains and resetting INPUT/FORWARD policy...")
+
+	for _, chain := range []string{gopherChain, gopherCustomChain} {
+		// Drop every INPUT jump to this chain (there may be duplicates).
+		del := append(append([]string{}, sudo...), "iptables", "-D", "INPUT", "-j", chain)
+		for exec.Command(del[0], del[1:]...).Run() == nil { // #nosec G204
+		}
+		flush := append(append([]string{}, sudo...), "iptables", "-F", chain)
+		_ = exec.Command(flush[0], flush[1:]...).Run() // #nosec G204
+		drop := append(append([]string{}, sudo...), "iptables", "-X", chain)
+		_ = exec.Command(drop[0], drop[1:]...).Run() // #nosec G204
+	}
+	// Reset to a permissive default so the box isn't locked down with no manager.
+	for _, chain := range []string{"INPUT", "FORWARD"} {
+		pol := append(append([]string{}, sudo...), "iptables", "-P", chain, "ACCEPT")
+		_ = exec.Command(pol[0], pol[1:]...).Run() // #nosec G204
+	}
+	fmt.Fprintln(logWriter, "  Gopher firewall state removed; INPUT/FORWARD policy = ACCEPT")
 }
 
 // persistRules is a best-effort save of iptables rules after a dynamic change.

@@ -110,6 +110,13 @@ func runServer(args []string) {
 	monitorSvc := service.NewMonitorService()
 	monitorSvc.Start()
 	if !*devMode {
+		// Migrate a legacy edge (apt Caddy, /etc/rathole, separate units) onto the
+		// /etc/gopher layout FIRST — before the Caddy reconciles below — so the
+		// orphan sweep + reconciles operate on the migrated config (including any
+		// legacy conf.d the migration imports). Doing it after the sweep let an
+		// imported orphan reach the first Caddy reload unswept. Certs are moved
+		// here too, before the supervised Caddy starts. No-op on fresh/migrated.
+		migrateEdgeLayoutIfManaged()
 		// Drop conf.d/gopher-tunnel-*.caddy orphans BEFORE the first Caddy
 		// reload — otherwise ReconcileMainCaddyfile's reload still sees the
 		// stale files and fails with "ambiguous site definition" when two
@@ -132,11 +139,6 @@ func runServer(args []string) {
 		// creates it via sudo useradd; the next reconcile picks it up.
 		localSvc.EnsureJumpboxUser()
 		localSvc.ReconcileAuthorizedKeys()
-		// Migrate a legacy edge (apt Caddy, /etc/rathole, separate units) onto the
-		// /etc/gopher layout BEFORE the reconcile below — so the reconcile reads the
-		// migrated config (preserving custom blocks) and Caddy's certs are moved
-		// before the supervised Caddy starts. No-op on fresh/already-migrated edges.
-		migrateEdgeLayoutIfManaged()
 		// Re-derive /etc/rathole/server.toml from the DB on every boot. Catches
 		// drift introduced by DB restore from backup, partial writes, or a crash
 		// between a tunnel/machine row delete and the disk reconcile that would
