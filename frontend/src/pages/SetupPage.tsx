@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 const toKeyFilename = (name: string) =>
   name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '')
-import { Lock, Eye, EyeOff, CheckCircle2, XCircle, Loader2, SkipForward, Key, RefreshCw, Upload, Download, ClipboardCopy, Shield, ShieldAlert, ShieldCheck, ShieldOff, ShieldBan, AlertTriangle, MinusCircle } from 'lucide-react'
+import { Lock, Eye, EyeOff, CheckCircle2, XCircle, Loader2, SkipForward, Key, RefreshCw, Upload, Download, ClipboardCopy, Shield, ShieldAlert, ShieldCheck, ShieldOff, ShieldBan, AlertTriangle, MinusCircle, HelpCircle, ChevronDown } from 'lucide-react'
 import client from '../api/client'
 import { useAuth } from '../lib/auth'
 import { localApi, type LocalServiceStatus, type FirewallStatus, type FirewallMode, type DNSCheckResult, type DNSCheck } from '../api/local'
@@ -206,6 +206,28 @@ function DNSPreflightBanner({
   )
 }
 
+// WildcardDNSHelp is a collapsible how-to for the wildcard record: a thin grey
+// outlined disclosure (? icon + chevron) that expands to numbered steps. Minimal
+// color — it's a quiet helper under the domain field, not a banner.
+function WildcardDNSHelp({ serverIP }: { serverIP: string }) {
+  const ip = serverIP || '<your server IP>'
+  return (
+    <details className="group rounded-lg border border-gray-200">
+      <summary className="cursor-pointer select-none flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-800 list-none [&::-webkit-details-marker]:hidden">
+        <HelpCircle size={14} className="text-gray-400 shrink-0" />
+        How to set up wildcard DNS
+        <ChevronDown size={14} className="ml-auto text-gray-400 transition-transform group-open:rotate-180" />
+      </summary>
+      <ol className="list-decimal px-3 pb-3 pl-8 pt-1 space-y-1.5 text-xs text-gray-600 leading-relaxed border-t border-gray-100">
+        <li>Open your DNS provider (where your domain's DNS is hosted).</li>
+        <li>Add an <strong>A</strong> record — Name <code>*</code>, Value <code>{ip}</code>, TTL auto.</li>
+        <li>Add a second <strong>A</strong> record — Name <code>@</code>, same value — so the bare domain resolves too.</li>
+        <li>If the record is proxied (e.g. Cloudflare's orange cloud), switch it to “DNS only”.</li>
+      </ol>
+    </details>
+  )
+}
+
 function ServicesStep({ onDone }: { onDone: () => void }) {
   const [domain, setDomain] = useState('')
   const [status, setStatus] = useState<LocalServiceStatus | null>(null)
@@ -308,15 +330,22 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
   const canInstall = Boolean(domain && dnsStatus === 'ok' && (status == null || status.has_install_permission))
 
   return (
+    <div className="space-y-3">
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
       <div className="flex items-center gap-2 text-blue-600">
         <span className="font-semibold text-sm uppercase tracking-wide">Step 2 of 4 — Local services</span>
       </div>
 
-      <p className="text-sm text-gray-600">
-        <strong>Caddy</strong> (HTTPS reverse proxy) and <strong>rathole</strong> (tunnel server) are bundled into
-        Gopher and run under it. Set your domain below — HTTPS and subdomain routing are configured automatically.
-      </p>
+      {/* Lead: the one thing the operator MUST do for any of this to work. */}
+      <div className="space-y-2">
+        <p className="text-sm text-gray-800">
+          Point a <strong>wildcard DNS record</strong> <code>*.{domain || 'yourdomain.com'}</code> at this server.
+          Every tunnel and the dashboard (<code>router.{domain || 'yourdomain.com'}</code>) resolve through it — without it nothing routes.
+        </p>
+        <p className="text-xs text-gray-400">
+          Caddy and rathole are bundled into Gopher; HTTPS and subdomain routing are then configured automatically.
+        </p>
+      </div>
 
       {/* Permission warning */}
       {status && !status.has_install_permission && (
@@ -410,6 +439,9 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
         wsPath="/api/local/logs/ws"
         autoStart
       />
+    </div>
+
+      <WildcardDNSHelp serverIP={serverIP} />
     </div>
   )
 }
