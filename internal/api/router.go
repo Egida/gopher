@@ -65,7 +65,6 @@ func NewRouter(
 		r.Post("/auth/login/2fa", authH.LoginTOTP)
 		r.Get("/local/status", localH.Status)
 		r.Post("/local/install", localH.Install)
-		r.Post("/local/skip", localH.Skip)
 		r.Get("/local/logs/ws", logsH.WebSocketDuringSetup)
 		r.Get("/local/check-dns", localH.CheckDNS)
 		r.Get("/local/resolve-ip", localH.ResolveIP)

@@ -21,7 +21,7 @@ func NewDebugHandler() *DebugHandler {
 func (h *DebugHandler) GetCaddyfile(w http.ResponseWriter, r *http.Request) {
 	vps, err := db.GetVPS()
 	if err != nil {
-		// Fall back to the domain stored in app settings (set via POST /api/local/skip or /install).
+		// Fall back to the domain stored in app settings (set via POST /api/local/install).
 		settings, sErr := db.GetSettings()
 		if sErr != nil || settings.Domain == "" {
 			response.NotFound(w, "no VPS or domain configured")

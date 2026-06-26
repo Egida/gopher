@@ -73,7 +73,6 @@ export const localApi = {
     client.post('/local/dismiss-custom-services-warning').then(r => r.data),
   install: (domain: string) =>
     client.post('/local/install', { domain }).then(r => r.data),
-  skip: (domain?: string) => client.post('/local/skip', { domain }).then(r => r.data),
   detectIP: () =>
     client.get<{ data: { ip: string } }>('/local/detect-ip').then(r => r.data.data),
   checkDNS: (domain: string, expectedIP?: string) => {

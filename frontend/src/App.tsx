@@ -113,9 +113,13 @@ function AppShell() {
   if (!isSetup) return <SetupPage initialStep={1} />
   if (!isAuthenticated) return <LoginPage />
   if (!localSetupDone) return <SetupPage initialStep={2} />
-  if (!firewallConfigured) return <SetupPage initialStep={3} />
-  if (!sshKeyConfigured) return <SetupPage initialStep={4} />
-  if (!fail2banSetupDone) return <SetupPage initialStep={5} />
+  // Firewall is intentionally LAST: its "gopher" takeover locks the dashboard
+  // port and redirects the browser to router.<domain>. Doing SSH-key + fail2ban
+  // first means that redirect is a clean one-way handoff to a fully-configured
+  // dashboard, not a bounce back into the wizard at the new URL.
+  if (!sshKeyConfigured) return <SetupPage initialStep={3} />
+  if (!fail2banSetupDone) return <SetupPage initialStep={4} />
+  if (!firewallConfigured) return <SetupPage initialStep={5} />
 
   const handleLogout = async () => {
     await client.post('/auth/logout').catch(() => {})

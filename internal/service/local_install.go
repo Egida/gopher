@@ -104,15 +104,6 @@ func (s *LocalSetupService) SetupFail2ban() error {
 	return nil
 }
 
-func (s *LocalSetupService) Skip(domain string) error {
-	return db.MutateSettings(func(settings *db.AppSettings) error {
-		settings.LocalSetupDone = true
-		if domain != "" {
-			settings.Domain = domain
-		}
-		return nil
-	})
-}
 
 func (s *LocalSetupService) doInstall(domain string, logWriter io.Writer) error {
 	fmt.Fprintln(logWriter, "=== Installing Local Services ===")

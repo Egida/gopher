@@ -125,23 +125,6 @@ func (h *LocalHandler) SetupFail2ban(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, map[string]string{"message": "fail2ban setup started"})
 }
 
-// POST /api/local/skip
-func (h *LocalHandler) Skip(w http.ResponseWriter, r *http.Request) {
-	if !guardSetupOnly(w, "install") {
-		return
-	}
-	var body struct {
-		Domain string `json:"domain"`
-	}
-	// Ignore decode errors — domain is optional
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if err := h.svc.Skip(body.Domain); err != nil {
-		response.InternalError(w, err.Error())
-		return
-	}
-	response.Success(w, map[string]string{"message": "skipped"})
-}
-
 // POST /api/local/reconcile — rebuild server.toml AND every tunnel's
 // Caddy file from DB. The latter recovers from any state where a tunnel
 // row in the DB has no matching Caddy file on disk (e.g. file was deleted

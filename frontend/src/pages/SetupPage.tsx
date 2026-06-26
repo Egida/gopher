@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 const toKeyFilename = (name: string) =>
   name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '')
-import { Lock, Eye, EyeOff, CheckCircle2, XCircle, Loader2, SkipForward, Key, RefreshCw, Upload, Download, ClipboardCopy, Shield, ShieldAlert, ShieldCheck, ShieldOff, ShieldBan, AlertTriangle, MinusCircle, HelpCircle, ChevronDown } from 'lucide-react'
+import { Lock, Eye, EyeOff, CheckCircle2, XCircle, Loader2, Key, RefreshCw, Upload, Download, ClipboardCopy, Shield, ShieldAlert, ShieldCheck, ShieldOff, ShieldBan, AlertTriangle, MinusCircle, HelpCircle, ChevronDown } from 'lucide-react'
 import client from '../api/client'
 import { useAuth } from '../lib/auth'
 import { localApi, type LocalServiceStatus, type FirewallStatus, type FirewallMode, type DNSCheckResult, type DNSCheck } from '../api/local'
@@ -232,7 +232,6 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
   const [domain, setDomain] = useState('')
   const [status, setStatus] = useState<LocalServiceStatus | null>(null)
   const [showLogs, setShowLogs] = useState(false)
-  const [skipping, setSkipping] = useState(false)
   const [dnsStatus, setDnsStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
   const [dnsMessage, setDnsMessage] = useState('')
   const [dnsResult, setDnsResult] = useState<DNSCheckResult | null>(null)
@@ -321,12 +320,6 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
   // (domain set), not whether the processes are alive.
   const alreadyConfigured = status?.local_setup_done === true && Boolean(status?.domain)
 
-  const handleSkip = async () => {
-    setSkipping(true)
-    await localApi.skip(domain || undefined).catch(() => {})
-    onDone()
-  }
-
   const canInstall = Boolean(domain && dnsStatus === 'ok' && (status == null || status.has_install_permission))
 
   return (
@@ -412,23 +405,14 @@ function ServicesStep({ onDone }: { onDone: () => void }) {
         </div>
       )}
 
-      <div className="flex gap-3">
-        <button
-          onClick={() => setShowLogs(true)}
-          disabled={!canInstall}
-          className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title={dnsStatus !== 'ok' ? 'Waiting for DNS to resolve before installing…' : undefined}
-        >
-          {alreadyConfigured ? '↻ Re-configure' : '⚙ Install & Configure'}
-        </button>
-        <button
-          onClick={handleSkip}
-          disabled={skipping}
-          className="flex items-center gap-1.5 px-4 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-        >
-          <SkipForward size={15} /> Skip
-        </button>
-      </div>
+      <button
+        onClick={() => setShowLogs(true)}
+        disabled={!canInstall}
+        className="w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        title={dnsStatus !== 'ok' ? 'Waiting for DNS to resolve before installing…' : undefined}
+      >
+        {alreadyConfigured ? '↻ Re-configure' : '⚙ Install & Configure'}
+      </button>
 
       <DeployLogModal
         isOpen={showLogs}
@@ -556,7 +540,7 @@ function FirewallStep({ onDone }: { onDone: () => void }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-4">
         <div className="flex items-center gap-2 text-blue-600">
           <ShieldCheck size={18} />
-          <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — Firewall</span>
+          <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — Firewall</span>
         </div>
         <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
           <CheckCircle2 size={18} className="text-green-600 mt-0.5 shrink-0" />
@@ -596,7 +580,7 @@ function FirewallStep({ onDone }: { onDone: () => void }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-5">
         <div className="flex items-center gap-2 text-blue-600">
           <ShieldCheck size={18} />
-          <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — Firewall</span>
+          <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — Firewall</span>
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3 text-sm text-amber-900">
@@ -644,7 +628,7 @@ function FirewallStep({ onDone }: { onDone: () => void }) {
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
       <div className="flex items-center gap-2 text-blue-600">
         <Shield size={18} />
-        <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — Firewall</span>
+        <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — Firewall</span>
       </div>
 
       <p className="text-sm text-gray-600">
@@ -706,21 +690,13 @@ function FirewallStep({ onDone }: { onDone: () => void }) {
         ))}
       </div>
 
-      <div className="flex gap-3">
-        <button
-          onClick={handleContinue}
-          disabled={skipping}
-          className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {skipping ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" /> Saving…</span> : 'Continue →'}
-        </button>
-        <button
-          onClick={onDone}
-          className="flex items-center gap-1.5 px-4 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-        >
-          <SkipForward size={15} /> Skip
-        </button>
-      </div>
+      <button
+        onClick={handleContinue}
+        disabled={skipping}
+        className="w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {skipping ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" /> Saving…</span> : 'Continue →'}
+      </button>
     </div>
   )
 }
@@ -777,7 +753,7 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
         <div className="flex items-center gap-2 text-blue-600">
           <Key size={18} />
-          <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — SSH key</span>
+          <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — SSH key</span>
         </div>
         <p className="text-sm text-gray-600">
           Gopher uses an SSH key pair to connect back into bootstrapped machines through their
@@ -818,12 +794,6 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
             </div>
           </button>
         </div>
-        <button
-          onClick={onDone}
-          className="w-full text-sm text-gray-400 hover:text-gray-600 py-2 transition-colors"
-        >
-          Skip — I'll set this up later
-        </button>
       </div>
     )
   }
@@ -834,7 +804,7 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-5">
         <div className="flex items-center gap-2 text-blue-600">
           <Key size={18} />
-          <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — Key generated</span>
+          <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — Key generated</span>
         </div>
         <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
           <CheckCircle2 size={18} className="text-green-600 mt-0.5 shrink-0" />
@@ -868,7 +838,7 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
           onClick={onDone}
           className="w-full bg-green-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors"
         >
-          Continue to Dashboard →
+          Continue →
         </button>
       </div>
     )
@@ -879,7 +849,7 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-5">
       <div className="flex items-center gap-2 text-blue-600">
         <Upload size={18} />
-        <span className="font-semibold text-sm uppercase tracking-wide">Step 4 of 4 — Upload SSH key</span>
+        <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 4 — Upload SSH key</span>
       </div>
       <p className="text-sm text-gray-500">Paste your key contents or click Browse to select files.</p>
       <div>
@@ -945,9 +915,6 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
           {loading ? 'Validating…' : 'Save key pair'}
         </button>
       </div>
-      <button onClick={onDone} className="w-full text-sm text-gray-400 hover:text-gray-600 py-1 transition-colors">
-        Skip
-      </button>
     </div>
   )
 }
@@ -956,16 +923,6 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
 
 function Fail2banStep({ onDone }: { onDone: () => void }) {
   const [showLogs, setShowLogs] = useState(false)
-  const [skipping, setSkipping] = useState(false)
-
-  const handleSkip = () => {
-    setSkipping(true)
-    // Mark done server-side by calling the endpoint with a no-op flag,
-    // or just advance — the flag won't be set, user can re-trigger from Security page.
-    // For skip, we call the skip-fail2ban endpoint (or we can accept the unset state
-    // and let them come back). Simplest: just refetch, which will re-check the flag.
-    onDone()
-  }
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
@@ -986,21 +943,12 @@ function Fail2banStep({ onDone }: { onDone: () => void }) {
         </ul>
       </div>
 
-      <div className="flex gap-3">
-        <button
-          onClick={() => setShowLogs(true)}
-          className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
-        >
-          Install fail2ban
-        </button>
-        <button
-          onClick={handleSkip}
-          disabled={skipping}
-          className="flex items-center gap-1.5 px-4 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-        >
-          <SkipForward size={15} /> Skip for now
-        </button>
-      </div>
+      <button
+        onClick={() => setShowLogs(true)}
+        className="w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
+      >
+        Install fail2ban
+      </button>
 
       <DeployLogModal
         isOpen={showLogs}
@@ -1025,9 +973,9 @@ export default function SetupPage({ initialStep = 1 }: { initialStep?: SetupStep
   const subtitle =
     step === 1 ? 'Create an admin password to get started'
     : step === 2 ? 'Set up local tunnel services'
-    : step === 3 ? 'Configure firewall rules'
-    : step === 5 ? 'Automatic IP banning for your server'
-    : 'Configure SSH key for machine access'
+    : step === 3 ? 'Configure SSH key for machine access'
+    : step === 4 ? 'Automatic IP banning for your server'
+    : 'Configure firewall rules'
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -1043,10 +991,10 @@ export default function SetupPage({ initialStep = 1 }: { initialStep?: SetupStep
           : step === 2
           ? <ServicesStep onDone={() => setStep(3)} />
           : step === 3
-          ? <FirewallStep onDone={refetch} />
-          : step === 5
+          ? <SSHKeyStep onDone={refetch} />
+          : step === 4
           ? <Fail2banStep onDone={refetch} />
-          : <SSHKeyStep onDone={refetch} />
+          : <FirewallStep onDone={refetch} />
         }
       </div>
     </div>
