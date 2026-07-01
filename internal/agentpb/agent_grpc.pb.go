@@ -38,6 +38,8 @@ const (
 	AgentControl_PutRatholeConfig_FullMethodName = "/agent.v1.AgentControl/PutRatholeConfig"
 	AgentControl_Diagnostics_FullMethodName      = "/agent.v1.AgentControl/Diagnostics"
 	AgentControl_Uninstall_FullMethodName        = "/agent.v1.AgentControl/Uninstall"
+	AgentControl_GetNetworkInfo_FullMethodName   = "/agent.v1.AgentControl/GetNetworkInfo"
+	AgentControl_AddAuthorizedKey_FullMethodName = "/agent.v1.AgentControl/AddAuthorizedKey"
 )
 
 // AgentControlClient is the client API for AgentControl service.
@@ -72,6 +74,16 @@ type AgentControlClient interface {
 	// Uninstall kicks off a detached worker that runs the on-disk
 	// gopher-uninstall script and returns immediately.
 	Uninstall(ctx context.Context, in *UninstallRequest, opts ...grpc.CallOption) (*UninstallResponse, error)
+	// GetNetworkInfo discovers the origin's WAN (public) and LAN (private) IPs
+	// on demand — kept out of the periodic status snapshot because the WAN
+	// lookup makes an outbound network call. Lets the server show network-map
+	// info without SSHing into the origin. (Added in agent 0.2.2; older agents
+	// return Unimplemented and the server falls back to SSH.)
+	GetNetworkInfo(ctx context.Context, in *GetNetworkInfoRequest, opts ...grpc.CallOption) (*NetworkInfo, error)
+	// AddAuthorizedKey appends an SSH public key to a user's authorized_keys
+	// (idempotent), so operator key rotation doesn't need the server to hold an
+	// SSH private key. (Added in agent 0.2.2; older agents return Unimplemented.)
+	AddAuthorizedKey(ctx context.Context, in *AddAuthorizedKeyRequest, opts ...grpc.CallOption) (*AddAuthorizedKeyResponse, error)
 }
 
 type agentControlClient struct {
@@ -171,6 +183,26 @@ func (c *agentControlClient) Uninstall(ctx context.Context, in *UninstallRequest
 	return out, nil
 }
 
+func (c *agentControlClient) GetNetworkInfo(ctx context.Context, in *GetNetworkInfoRequest, opts ...grpc.CallOption) (*NetworkInfo, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NetworkInfo)
+	err := c.cc.Invoke(ctx, AgentControl_GetNetworkInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentControlClient) AddAuthorizedKey(ctx context.Context, in *AddAuthorizedKeyRequest, opts ...grpc.CallOption) (*AddAuthorizedKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddAuthorizedKeyResponse)
+	err := c.cc.Invoke(ctx, AgentControl_AddAuthorizedKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentControlServer is the server API for AgentControl service.
 // All implementations must embed UnimplementedAgentControlServer
 // for forward compatibility.
@@ -203,6 +235,16 @@ type AgentControlServer interface {
 	// Uninstall kicks off a detached worker that runs the on-disk
 	// gopher-uninstall script and returns immediately.
 	Uninstall(context.Context, *UninstallRequest) (*UninstallResponse, error)
+	// GetNetworkInfo discovers the origin's WAN (public) and LAN (private) IPs
+	// on demand — kept out of the periodic status snapshot because the WAN
+	// lookup makes an outbound network call. Lets the server show network-map
+	// info without SSHing into the origin. (Added in agent 0.2.2; older agents
+	// return Unimplemented and the server falls back to SSH.)
+	GetNetworkInfo(context.Context, *GetNetworkInfoRequest) (*NetworkInfo, error)
+	// AddAuthorizedKey appends an SSH public key to a user's authorized_keys
+	// (idempotent), so operator key rotation doesn't need the server to hold an
+	// SSH private key. (Added in agent 0.2.2; older agents return Unimplemented.)
+	AddAuthorizedKey(context.Context, *AddAuthorizedKeyRequest) (*AddAuthorizedKeyResponse, error)
 	mustEmbedUnimplementedAgentControlServer()
 }
 
@@ -236,6 +278,12 @@ func (UnimplementedAgentControlServer) Diagnostics(context.Context, *Diagnostics
 }
 func (UnimplementedAgentControlServer) Uninstall(context.Context, *UninstallRequest) (*UninstallResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Uninstall not implemented")
+}
+func (UnimplementedAgentControlServer) GetNetworkInfo(context.Context, *GetNetworkInfoRequest) (*NetworkInfo, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetNetworkInfo not implemented")
+}
+func (UnimplementedAgentControlServer) AddAuthorizedKey(context.Context, *AddAuthorizedKeyRequest) (*AddAuthorizedKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddAuthorizedKey not implemented")
 }
 func (UnimplementedAgentControlServer) mustEmbedUnimplementedAgentControlServer() {}
 func (UnimplementedAgentControlServer) testEmbeddedByValue()                      {}
@@ -395,6 +443,42 @@ func _AgentControl_Uninstall_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentControl_GetNetworkInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNetworkInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).GetNetworkInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_GetNetworkInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).GetNetworkInfo(ctx, req.(*GetNetworkInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentControl_AddAuthorizedKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddAuthorizedKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).AddAuthorizedKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_AddAuthorizedKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).AddAuthorizedKey(ctx, req.(*AddAuthorizedKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentControl_ServiceDesc is the grpc.ServiceDesc for AgentControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -429,6 +513,14 @@ var AgentControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Uninstall",
 			Handler:    _AgentControl_Uninstall_Handler,
+		},
+		{
+			MethodName: "GetNetworkInfo",
+			Handler:    _AgentControl_GetNetworkInfo_Handler,
+		},
+		{
+			MethodName: "AddAuthorizedKey",
+			Handler:    _AgentControl_AddAuthorizedKey_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

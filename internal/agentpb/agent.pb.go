@@ -952,6 +952,190 @@ func (x *UninstallResponse) GetLog() string {
 	return ""
 }
 
+type GetNetworkInfoRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetNetworkInfoRequest) Reset() {
+	*x = GetNetworkInfoRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetNetworkInfoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetNetworkInfoRequest) ProtoMessage() {}
+
+func (x *GetNetworkInfoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetNetworkInfoRequest.ProtoReflect.Descriptor instead.
+func (*GetNetworkInfoRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{17}
+}
+
+type NetworkInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WanIp         string                 `protobuf:"bytes,1,opt,name=wan_ip,json=wanIp,proto3" json:"wan_ip,omitempty"` // public IP (outbound-discovered)
+	LanIp         string                 `protobuf:"bytes,2,opt,name=lan_ip,json=lanIp,proto3" json:"lan_ip,omitempty"` // primary NIC private IP
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkInfo) Reset() {
+	*x = NetworkInfo{}
+	mi := &file_agent_v1_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkInfo) ProtoMessage() {}
+
+func (x *NetworkInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkInfo.ProtoReflect.Descriptor instead.
+func (*NetworkInfo) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *NetworkInfo) GetWanIp() string {
+	if x != nil {
+		return x.WanIp
+	}
+	return ""
+}
+
+func (x *NetworkInfo) GetLanIp() string {
+	if x != nil {
+		return x.LanIp
+	}
+	return ""
+}
+
+type AddAuthorizedKeyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`                    // whose ~/.ssh/authorized_keys to append to
+	PublicKey     string                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // the authorized_keys line to add (idempotent)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddAuthorizedKeyRequest) Reset() {
+	*x = AddAuthorizedKeyRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddAuthorizedKeyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddAuthorizedKeyRequest) ProtoMessage() {}
+
+func (x *AddAuthorizedKeyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddAuthorizedKeyRequest.ProtoReflect.Descriptor instead.
+func (*AddAuthorizedKeyRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AddAuthorizedKeyRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *AddAuthorizedKeyRequest) GetPublicKey() string {
+	if x != nil {
+		return x.PublicKey
+	}
+	return ""
+}
+
+type AddAuthorizedKeyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Added         bool                   `protobuf:"varint,1,opt,name=added,proto3" json:"added,omitempty"` // false when the key was already present
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddAuthorizedKeyResponse) Reset() {
+	*x = AddAuthorizedKeyResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddAuthorizedKeyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddAuthorizedKeyResponse) ProtoMessage() {}
+
+func (x *AddAuthorizedKeyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddAuthorizedKeyResponse.ProtoReflect.Descriptor instead.
+func (*AddAuthorizedKeyResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AddAuthorizedKeyResponse) GetAdded() bool {
+	if x != nil {
+		return x.Added
+	}
+	return false
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -1016,7 +1200,17 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x11UninstallResponse\x12\x16\n" +
 	"\x06queued\x18\x01 \x01(\bR\x06queued\x12\x16\n" +
 	"\x06script\x18\x02 \x01(\tR\x06script\x12\x10\n" +
-	"\x03log\x18\x03 \x01(\tR\x03log2\xdc\x04\n" +
+	"\x03log\x18\x03 \x01(\tR\x03log\"\x17\n" +
+	"\x15GetNetworkInfoRequest\";\n" +
+	"\vNetworkInfo\x12\x15\n" +
+	"\x06wan_ip\x18\x01 \x01(\tR\x05wanIp\x12\x15\n" +
+	"\x06lan_ip\x18\x02 \x01(\tR\x05lanIp\"T\n" +
+	"\x17AddAuthorizedKeyRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x02 \x01(\tR\tpublicKey\"0\n" +
+	"\x18AddAuthorizedKeyResponse\x12\x14\n" +
+	"\x05added\x18\x01 \x01(\bR\x05added2\x81\x06\n" +
 	"\fAgentControl\x12@\n" +
 	"\n" +
 	"GetVersion\x12\x1b.agent.v1.GetVersionRequest\x1a\x15.agent.v1.VersionInfo\x12=\n" +
@@ -1026,7 +1220,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x10GetRatholeConfig\x12!.agent.v1.GetRatholeConfigRequest\x1a\x17.agent.v1.RatholeConfig\x12O\n" +
 	"\x10PutRatholeConfig\x12\x17.agent.v1.RatholeConfig\x1a\".agent.v1.PutRatholeConfigResponse\x12J\n" +
 	"\vDiagnostics\x12\x1c.agent.v1.DiagnosticsRequest\x1a\x1d.agent.v1.DiagnosticsResponse\x12D\n" +
-	"\tUninstall\x12\x1a.agent.v1.UninstallRequest\x1a\x1b.agent.v1.UninstallResponseB5Z3github.com/smalex-z/gopher/internal/agentpb;agentpbb\x06proto3"
+	"\tUninstall\x12\x1a.agent.v1.UninstallRequest\x1a\x1b.agent.v1.UninstallResponse\x12H\n" +
+	"\x0eGetNetworkInfo\x12\x1f.agent.v1.GetNetworkInfoRequest\x1a\x15.agent.v1.NetworkInfo\x12Y\n" +
+	"\x10AddAuthorizedKey\x12!.agent.v1.AddAuthorizedKeyRequest\x1a\".agent.v1.AddAuthorizedKeyResponseB5Z3github.com/smalex-z/gopher/internal/agentpb;agentpbb\x06proto3"
 
 var (
 	file_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -1040,7 +1236,7 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_agent_v1_agent_proto_rawDescData
 }
 
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_agent_v1_agent_proto_goTypes = []any{
 	(*GetVersionRequest)(nil),        // 0: agent.v1.GetVersionRequest
 	(*VersionInfo)(nil),              // 1: agent.v1.VersionInfo
@@ -1059,6 +1255,10 @@ var file_agent_v1_agent_proto_goTypes = []any{
 	(*DiagCheck)(nil),                // 14: agent.v1.DiagCheck
 	(*UninstallRequest)(nil),         // 15: agent.v1.UninstallRequest
 	(*UninstallResponse)(nil),        // 16: agent.v1.UninstallResponse
+	(*GetNetworkInfoRequest)(nil),    // 17: agent.v1.GetNetworkInfoRequest
+	(*NetworkInfo)(nil),              // 18: agent.v1.NetworkInfo
+	(*AddAuthorizedKeyRequest)(nil),  // 19: agent.v1.AddAuthorizedKeyRequest
+	(*AddAuthorizedKeyResponse)(nil), // 20: agent.v1.AddAuthorizedKeyResponse
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.StatusInfo.rathole:type_name -> agent.v1.RatholeStatus
@@ -1072,16 +1272,20 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	10, // 8: agent.v1.AgentControl.PutRatholeConfig:input_type -> agent.v1.RatholeConfig
 	12, // 9: agent.v1.AgentControl.Diagnostics:input_type -> agent.v1.DiagnosticsRequest
 	15, // 10: agent.v1.AgentControl.Uninstall:input_type -> agent.v1.UninstallRequest
-	1,  // 11: agent.v1.AgentControl.GetVersion:output_type -> agent.v1.VersionInfo
-	4,  // 12: agent.v1.AgentControl.GetStatus:output_type -> agent.v1.StatusInfo
-	4,  // 13: agent.v1.AgentControl.WatchStatus:output_type -> agent.v1.StatusInfo
-	8,  // 14: agent.v1.AgentControl.RestartRathole:output_type -> agent.v1.RestartRatholeResponse
-	10, // 15: agent.v1.AgentControl.GetRatholeConfig:output_type -> agent.v1.RatholeConfig
-	11, // 16: agent.v1.AgentControl.PutRatholeConfig:output_type -> agent.v1.PutRatholeConfigResponse
-	13, // 17: agent.v1.AgentControl.Diagnostics:output_type -> agent.v1.DiagnosticsResponse
-	16, // 18: agent.v1.AgentControl.Uninstall:output_type -> agent.v1.UninstallResponse
-	11, // [11:19] is the sub-list for method output_type
-	3,  // [3:11] is the sub-list for method input_type
+	17, // 11: agent.v1.AgentControl.GetNetworkInfo:input_type -> agent.v1.GetNetworkInfoRequest
+	19, // 12: agent.v1.AgentControl.AddAuthorizedKey:input_type -> agent.v1.AddAuthorizedKeyRequest
+	1,  // 13: agent.v1.AgentControl.GetVersion:output_type -> agent.v1.VersionInfo
+	4,  // 14: agent.v1.AgentControl.GetStatus:output_type -> agent.v1.StatusInfo
+	4,  // 15: agent.v1.AgentControl.WatchStatus:output_type -> agent.v1.StatusInfo
+	8,  // 16: agent.v1.AgentControl.RestartRathole:output_type -> agent.v1.RestartRatholeResponse
+	10, // 17: agent.v1.AgentControl.GetRatholeConfig:output_type -> agent.v1.RatholeConfig
+	11, // 18: agent.v1.AgentControl.PutRatholeConfig:output_type -> agent.v1.PutRatholeConfigResponse
+	13, // 19: agent.v1.AgentControl.Diagnostics:output_type -> agent.v1.DiagnosticsResponse
+	16, // 20: agent.v1.AgentControl.Uninstall:output_type -> agent.v1.UninstallResponse
+	18, // 21: agent.v1.AgentControl.GetNetworkInfo:output_type -> agent.v1.NetworkInfo
+	20, // 22: agent.v1.AgentControl.AddAuthorizedKey:output_type -> agent.v1.AddAuthorizedKeyResponse
+	13, // [13:23] is the sub-list for method output_type
+	3,  // [3:13] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -1098,7 +1302,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

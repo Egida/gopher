@@ -94,6 +94,28 @@ func TestGRPC_CorrectTokenSucceeds(t *testing.T) {
 	}
 }
 
+func TestGRPC_AddAuthorizedKeyValidation(t *testing.T) {
+	addr := startTestAgent(t, "secret")
+	client := dialAgent(t, addr, "secret")
+	cases := []struct {
+		name     string
+		req      *agentpb.AddAuthorizedKeyRequest
+		wantCode codes.Code
+	}{
+		{"empty username", &agentpb.AddAuthorizedKeyRequest{PublicKey: "ssh-rsa AAAA"}, codes.InvalidArgument},
+		{"empty pubkey", &agentpb.AddAuthorizedKeyRequest{Username: "ubuntu"}, codes.InvalidArgument},
+		{"multiline pubkey", &agentpb.AddAuthorizedKeyRequest{Username: "ubuntu", PublicKey: "ssh-rsa AAAA\nssh-rsa BBBB"}, codes.InvalidArgument},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.AddAuthorizedKey(context.Background(), tc.req)
+			if status.Code(err) != tc.wantCode {
+				t.Fatalf("got %v, want %v", status.Code(err), tc.wantCode)
+			}
+		})
+	}
+}
+
 func TestGRPC_PutRatholeConfigRejectsEmpty(t *testing.T) {
 	addr := startTestAgent(t, "secret")
 	client := dialAgent(t, addr, "secret")

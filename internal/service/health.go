@@ -102,7 +102,7 @@ type AgentUpgrader interface {
 // targetAgentVersion is the agent version this server expects; bump it in
 // lockstep with cmd/agent's agentVersion. A reachable agent reporting an older
 // version is auto-upgraded.
-const targetAgentVersion = "0.2.1"
+const targetAgentVersion = "0.2.2"
 
 // Auto-upgrade pacing. The retry interval per machine starts short and backs
 // off on each successive failed attempt, so an upgrade that's merely in-flight

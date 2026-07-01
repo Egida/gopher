@@ -203,6 +203,41 @@ func (c *AgentClient) RestartRathole(ctx context.Context) error {
 	return nil
 }
 
+// NetworkInfo asks the agent to discover the origin's WAN + LAN IPs locally,
+// replacing the SSH round-trip. Returns codes.Unimplemented from agents older
+// than 0.2.2 — callers should treat that as "fall back to SSH / degrade".
+func (c *AgentClient) NetworkInfo(ctx context.Context) (wan, lan string, err error) {
+	conn, err := c.dial()
+	if err != nil {
+		return "", "", err
+	}
+	defer conn.Close()
+	resp, err := agentpb.NewAgentControlClient(conn).GetNetworkInfo(ctx, &agentpb.GetNetworkInfoRequest{})
+	if err != nil {
+		return "", "", fmt.Errorf("agent GetNetworkInfo: %w", err)
+	}
+	return resp.GetWanIp(), resp.GetLanIp(), nil
+}
+
+// AddAuthorizedKey asks the agent to append a public key to the given user's
+// authorized_keys (idempotent), replacing an SSH round-trip. Returns
+// codes.Unimplemented from agents older than 0.2.2.
+func (c *AgentClient) AddAuthorizedKey(ctx context.Context, username, publicKey string) error {
+	conn, err := c.dial()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_, err = agentpb.NewAgentControlClient(conn).AddAuthorizedKey(ctx, &agentpb.AddAuthorizedKeyRequest{
+		Username:  username,
+		PublicKey: publicKey,
+	})
+	if err != nil {
+		return fmt.Errorf("agent AddAuthorizedKey: %w", err)
+	}
+	return nil
+}
+
 // Version returns the agent build version. Useful for detecting when an agent
 // install has completed and is reachable.
 func (c *AgentClient) Version(ctx context.Context) (string, error) {

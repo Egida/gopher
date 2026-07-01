@@ -219,6 +219,55 @@ func (s *agentServer) Uninstall(_ context.Context, _ *agentpb.UninstallRequest) 
 	}, nil
 }
 
+// GetNetworkInfo discovers the origin's public (WAN) and private (LAN) IPs
+// locally — the same lookups the server used to run over SSH. Kept as its own
+// on-demand RPC (not in the status stream) because the WAN lookup makes an
+// outbound network call.
+func (s *agentServer) GetNetworkInfo(ctx context.Context, _ *agentpb.GetNetworkInfoRequest) (*agentpb.NetworkInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	// WAN: opendns first (fast, no HTTP), fall back to ipify over HTTPS.
+	wan, _ := exec.CommandContext(ctx, "sh", "-c", // #nosec G204 — fixed command
+		`dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null | head -1 || curl -sf --max-time 5 https://api.ipify.org 2>/dev/null`).Output()
+	// LAN: first address from the machine's own NICs.
+	lan, _ := exec.CommandContext(ctx, "sh", "-c", `hostname -I 2>/dev/null | awk '{print $1}'`).Output() // #nosec G204 — fixed command
+	return &agentpb.NetworkInfo{
+		WanIp: strings.TrimSpace(string(wan)),
+		LanIp: strings.TrimSpace(string(lan)),
+	}, nil
+}
+
+// AddAuthorizedKey appends an SSH public key to a user's authorized_keys
+// (idempotent). Lets the server rotate operator keys onto an origin without
+// holding an SSH private key of its own. Bearer-token gated like every RPC.
+func (s *agentServer) AddAuthorizedKey(ctx context.Context, in *agentpb.AddAuthorizedKeyRequest) (*agentpb.AddAuthorizedKeyResponse, error) {
+	user := strings.TrimSpace(in.GetUsername())
+	pubkey := strings.TrimSpace(in.GetPublicKey())
+	if user == "" || pubkey == "" {
+		return nil, status.Error(codes.InvalidArgument, "username and public_key required")
+	}
+	if strings.ContainsAny(pubkey, "\n\r") {
+		return nil, status.Error(codes.InvalidArgument, "public_key must be a single line")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	// Resolve the user's home, ensure ~/.ssh, append the key if absent. Prints
+	// "added" or "present" so we can report whether a write happened.
+	script := `set -e
+u="$1"; pk="$2"
+home=$(getent passwd "$u" | cut -d: -f6)
+[ -n "$home" ] || { echo "no home dir for user $u" >&2; exit 2; }
+mkdir -p "$home/.ssh"; touch "$home/.ssh/authorized_keys"
+chmod 700 "$home/.ssh"; chmod 600 "$home/.ssh/authorized_keys"
+if grep -qF "$pk" "$home/.ssh/authorized_keys"; then echo present; else printf '%s\n' "$pk" >> "$home/.ssh/authorized_keys"; echo added; fi
+chown -R "$u:$u" "$home/.ssh"`
+	out, err := exec.CommandContext(ctx, "sudo", "-n", "sh", "-c", script, "_", user, pubkey).CombinedOutput() // #nosec G204 — args are fixed positions
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "add authorized_key for %s: %v: %s", user, err, strings.TrimSpace(string(out)))
+	}
+	return &agentpb.AddAuthorizedKeyResponse{Added: strings.Contains(string(out), "added")}, nil
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 func (s *agentServer) buildStatus() *agentpb.StatusInfo {

@@ -290,19 +290,30 @@ func (s *MachineService) Status(id string) (map[string]interface{}, error) {
 	}, nil
 }
 
-// RefreshNetworkInfo SSHes into the machine, discovers its WAN IP and LAN IP,
-// stores the public IP on the machine record, and returns the info.
+// RefreshNetworkInfo discovers the machine's WAN + LAN IP and stores the public
+// IP. Prefers the agent (GetNetworkInfo, no SSH); falls back to SSH only when a
+// private key is stored and the agent path didn't produce an answer (e.g. agent
+// older than 0.2.2 → Unimplemented).
 func (s *MachineService) RefreshNetworkInfo(id string) (map[string]interface{}, error) {
 	machine, err := db.GetMachine(id)
 	if err != nil {
 		return nil, err
 	}
 
-	// Network-info discovery is one of the few ops still done over SSH (the agent
-	// doesn't report WAN/LAN IP yet). It needs a stored private key; when the
-	// operator has gone public-only, surface that clearly instead of a dial error.
+	// Agent-first: no SSH, no private key needed. On old agents this returns
+	// Unimplemented and we fall through to the SSH path.
+	if machine.AgentInstalled && machine.AgentRemotePort > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		wan, lan, aerr := NewAgentClient(machine).NetworkInfo(ctx)
+		cancel()
+		if aerr == nil && (wan != "" || lan != "") {
+			return s.finalizeNetworkInfo(machine, wan, lan), nil
+		}
+	}
+
+	// SSH fallback needs a stored private key; when public-only, surface that.
 	if machine.TunnelPort > 0 && !machineHasSSHPrivateKey(machine) && machine.PrivateKey == "" {
-		return map[string]interface{}{"id": id, "error": "network-info discovery needs a stored SSH private key (this machine is public-only / agent-managed)"}, nil
+		return map[string]interface{}{"id": id, "error": "network-info discovery unavailable: no agent support and no stored SSH private key (public-only machine)"}, nil
 	}
 
 	var client *sshpkg.SSHClient
@@ -344,26 +355,26 @@ func (s *MachineService) RefreshNetworkInfo(id string) (map[string]interface{}, 
 
 	// LAN (private) IP from the machine's own NIC.
 	lanOut, _ := client.Execute(`hostname -I 2>/dev/null | awk '{print $1}'`)
-	privateIP := strings.TrimSpace(lanOut)
+	return s.finalizeNetworkInfo(machine, publicIP, strings.TrimSpace(lanOut)), nil
+}
+
+// finalizeNetworkInfo persists the discovered public IP and shapes the response,
+// shared by the agent and SSH discovery paths.
+func (s *MachineService) finalizeNetworkInfo(machine *db.Machine, publicIP, privateIP string) map[string]interface{} {
 	if privateIP == "" {
 		privateIP = machine.Host
 	}
-
-	// Persist so subsequent loads don't need an SSH round-trip.
 	if publicIP != "" && publicIP != machine.PublicIP {
 		machine.PublicIP = publicIP
 		machine.UpdatedAt = time.Now()
 		_ = db.UpdateMachine(machine)
 	}
-
-	isNAT := publicIP != "" && privateIP != "" && publicIP != privateIP
-
 	return map[string]interface{}{
-		"id":         id,
+		"id":         machine.ID,
 		"public_ip":  publicIP,
 		"private_ip": privateIP,
-		"is_nat":     isNAT,
-	}, nil
+		"is_nat":     publicIP != "" && privateIP != "" && publicIP != privateIP,
+	}
 }
 
 // ReassignSSHKey installs newKeyID's public key on the machine (via its current
@@ -379,30 +390,44 @@ func (s *MachineService) ReassignSSHKey(machineID, newKeyID string) error {
 		return err
 	}
 
-	// Connect using the current key.
-	currentKey, err := db.GetSSHKeyForMachine(machine)
-	if err != nil {
-		return fmt.Errorf("cannot determine current SSH key: %w", err)
-	}
 	if machine.TunnelPort == 0 {
 		return fmt.Errorf("machine has no active tunnel — cannot push key")
 	}
-	if currentKey.PrivateKey == "" {
-		return fmt.Errorf("current key is public-only (private deleted) — cannot SSH to install the new key; re-bootstrap the machine to rotate keys")
-	}
-	client, err := sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, currentKey.PrivateKey)
-	if err != nil {
-		return fmt.Errorf("failed to connect to machine: %w", err)
-	}
-	defer client.Close()
 
-	// Append the new public key (idempotent).
-	appendCmd := fmt.Sprintf(
-		`grep -qF %q ~/.ssh/authorized_keys 2>/dev/null || echo %q >> ~/.ssh/authorized_keys`,
-		newKey.PublicKey, newKey.PublicKey,
-	)
-	if _, err := client.Execute(appendCmd); err != nil {
-		return fmt.Errorf("failed to install new key on machine: %w", err)
+	// Agent-first: append the new pubkey via the agent — no SSH, no stored
+	// private key needed. On agents older than 0.2.2 this errors (Unimplemented)
+	// and we fall through to the SSH path.
+	installed := false
+	if machine.AgentInstalled && machine.AgentRemotePort > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		aerr := NewAgentClient(machine).AddAuthorizedKey(ctx, machine.Username, newKey.PublicKey)
+		cancel()
+		if aerr == nil {
+			installed = true
+		}
+	}
+
+	if !installed {
+		// SSH fallback — needs the current key's private half.
+		currentKey, err := db.GetSSHKeyForMachine(machine)
+		if err != nil {
+			return fmt.Errorf("cannot determine current SSH key: %w", err)
+		}
+		if currentKey.PrivateKey == "" {
+			return fmt.Errorf("no agent support and current key is public-only — cannot install the new key; re-bootstrap the machine to rotate keys")
+		}
+		client, err := sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, currentKey.PrivateKey)
+		if err != nil {
+			return fmt.Errorf("failed to connect to machine: %w", err)
+		}
+		defer client.Close()
+		appendCmd := fmt.Sprintf(
+			`grep -qF %q ~/.ssh/authorized_keys 2>/dev/null || echo %q >> ~/.ssh/authorized_keys`,
+			newKey.PublicKey, newKey.PublicKey,
+		)
+		if _, err := client.Execute(appendCmd); err != nil {
+			return fmt.Errorf("failed to install new key on machine: %w", err)
+		}
 	}
 
 	machine.SSHKeyID = newKeyID

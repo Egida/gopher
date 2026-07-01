@@ -49,6 +49,18 @@ service AgentControl {
   // Uninstall kicks off a detached worker that runs the on-disk
   // gopher-uninstall script and returns immediately.
   rpc Uninstall(UninstallRequest) returns (UninstallResponse);
+
+  // GetNetworkInfo discovers the origin's WAN (public) and LAN (private) IPs
+  // on demand — kept out of the periodic status snapshot because the WAN
+  // lookup makes an outbound network call. Lets the server show network-map
+  // info without SSHing into the origin. (Added in agent 0.2.2; older agents
+  // return Unimplemented and the server falls back to SSH.)
+  rpc GetNetworkInfo(GetNetworkInfoRequest) returns (NetworkInfo);
+
+  // AddAuthorizedKey appends an SSH public key to a user's authorized_keys
+  // (idempotent), so operator key rotation doesn't need the server to hold an
+  // SSH private key. (Added in agent 0.2.2; older agents return Unimplemented.)
+  rpc AddAuthorizedKey(AddAuthorizedKeyRequest) returns (AddAuthorizedKeyResponse);
 }
 
 message GetVersionRequest {}
@@ -136,4 +148,20 @@ message UninstallResponse {
   bool queued = 1;
   string script = 2;
   string log = 3;
+}
+
+message GetNetworkInfoRequest {}
+
+message NetworkInfo {
+  string wan_ip = 1; // public IP (outbound-discovered)
+  string lan_ip = 2; // primary NIC private IP
+}
+
+message AddAuthorizedKeyRequest {
+  string username = 1;   // whose ~/.ssh/authorized_keys to append to
+  string public_key = 2; // the authorized_keys line to add (idempotent)
+}
+
+message AddAuthorizedKeyResponse {
+  bool added = 1; // false when the key was already present
 }

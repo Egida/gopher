@@ -45,9 +45,12 @@ const (
 	// intentionally independent of the server's tag-injected version.
 	//
 	// 0.2.1: consolidate origin config under /etc/gopher (client.toml +
-	// config.env), migrated in place on first boot. No wire-protocol change, so
+	// config.env), migrated in place on first boot.
+	// 0.2.2: add GetNetworkInfo + AddAuthorizedKey RPCs so the server no longer
+	// needs an SSH private key for network-info discovery or operator key
+	// rotation. Additive RPCs — older servers/agents ignore them — so
 	// protocolVersion is unchanged.
-	agentVersion = "0.2.1"
+	agentVersion = "0.2.2"
 
 	// protocolVersion is the wire-compatibility contract between server and
 	// agent. The server gates compatibility on this integer, NOT on the semver
