@@ -409,6 +409,13 @@ func BlankSSHPrivateKey(id string) error {
 	return DB.Model(&SSHKey{}).Where("id = ?", id).Update("private_key", "").Error
 }
 
+// SetSSHPrivateKey stores (or restores) the private half of an existing
+// public-only key. Column-level update. The caller must have verified the
+// private key matches the stored public key first.
+func SetSSHPrivateKey(id, privateKey string) error {
+	return DB.Model(&SSHKey{}).Where("id = ?", id).Update("private_key", privateKey).Error
+}
+
 func SetDefaultSSHKey(id string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&SSHKey{}).Where("is_default = ?", true).Update("is_default", false).Error; err != nil {

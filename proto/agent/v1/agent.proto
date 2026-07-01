@@ -57,10 +57,13 @@ service AgentControl {
   // return Unimplemented and the server falls back to SSH.)
   rpc GetNetworkInfo(GetNetworkInfoRequest) returns (NetworkInfo);
 
-  // AddAuthorizedKey appends an SSH public key to a user's authorized_keys
-  // (idempotent), so operator key rotation doesn't need the server to hold an
-  // SSH private key. (Added in agent 0.2.2; older agents return Unimplemented.)
-  rpc AddAuthorizedKey(AddAuthorizedKeyRequest) returns (AddAuthorizedKeyResponse);
+  // SetManagedKey makes public_key the ONE gopher-managed key in a user's
+  // authorized_keys: it removes every prior gopher-managed key (tagged with the
+  // `gopher-managed` comment) and adds this one. Operator-owned keys are never
+  // touched. Lets key rotation happen without the server holding an SSH private
+  // key, and keeps authorized_keys from accumulating stale keys. (Added in agent
+  // 0.2.2; older agents return Unimplemented.)
+  rpc SetManagedKey(SetManagedKeyRequest) returns (SetManagedKeyResponse);
 }
 
 message GetVersionRequest {}
@@ -157,11 +160,9 @@ message NetworkInfo {
   string lan_ip = 2; // primary NIC private IP
 }
 
-message AddAuthorizedKeyRequest {
-  string username = 1;   // whose ~/.ssh/authorized_keys to append to
-  string public_key = 2; // the authorized_keys line to add (idempotent)
+message SetManagedKeyRequest {
+  string username = 1;   // whose ~/.ssh/authorized_keys to manage
+  string public_key = 2; // the key to become the single gopher-managed entry
 }
 
-message AddAuthorizedKeyResponse {
-  bool added = 1; // false when the key was already present
-}
+message SetManagedKeyResponse {}

@@ -192,8 +192,8 @@ func (h *LocalHandler) UploadSSHKey(w http.ResponseWriter, r *http.Request) {
 		response.BadRequest(w, "invalid request body")
 		return
 	}
-	if req.PrivateKey == "" || req.PublicKey == "" {
-		response.BadRequest(w, "private_key and public_key are required")
+	if req.PublicKey == "" {
+		response.BadRequest(w, "public_key is required")
 		return
 	}
 	if req.Name == "" {
@@ -262,6 +262,25 @@ func (h *LocalHandler) DownloadSSHKey(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="gopher_id_rsa"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(key))
+}
+
+// POST /api/local/ssh-keys/{id}/private — store/restore the private half of an
+// existing key. Verified against the stored public key server-side, so no
+// step-up challenge is needed (only the matching private key is accepted).
+func (h *LocalHandler) AddPrivateKey(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PrivateKey string `json:"private_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.svc.AddPrivateKey(id, body.PrivateKey); err != nil {
+		response.BadRequest(w, err.Error())
+		return
+	}
+	response.Success(w, map[string]string{"message": "private key stored"})
 }
 
 // POST /api/local/ssh-keys/{id}/delete-private — clear the stored private key,

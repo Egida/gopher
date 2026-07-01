@@ -219,21 +219,22 @@ func (c *AgentClient) NetworkInfo(ctx context.Context) (wan, lan string, err err
 	return resp.GetWanIp(), resp.GetLanIp(), nil
 }
 
-// AddAuthorizedKey asks the agent to append a public key to the given user's
-// authorized_keys (idempotent), replacing an SSH round-trip. Returns
-// codes.Unimplemented from agents older than 0.2.2.
-func (c *AgentClient) AddAuthorizedKey(ctx context.Context, username, publicKey string) error {
+// SetManagedKey asks the agent to make publicKey the single gopher-managed key
+// in the user's authorized_keys — replacing any prior managed key, leaving
+// operator keys alone. Replaces an SSH round-trip. Returns codes.Unimplemented
+// from agents older than 0.2.2.
+func (c *AgentClient) SetManagedKey(ctx context.Context, username, publicKey string) error {
 	conn, err := c.dial()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	_, err = agentpb.NewAgentControlClient(conn).AddAuthorizedKey(ctx, &agentpb.AddAuthorizedKeyRequest{
+	_, err = agentpb.NewAgentControlClient(conn).SetManagedKey(ctx, &agentpb.SetManagedKeyRequest{
 		Username:  username,
 		PublicKey: publicKey,
 	})
 	if err != nil {
-		return fmt.Errorf("agent AddAuthorizedKey: %w", err)
+		return fmt.Errorf("agent SetManagedKey: %w", err)
 	}
 	return nil
 }

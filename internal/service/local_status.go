@@ -59,7 +59,6 @@ func TunnelDialHost(m *db.Machine) string {
 	return "localhost"
 }
 
-
 // LocalServiceStatus is returned by GET /api/local/status.
 type LocalServiceStatus struct {
 	CaddyInstalled       bool   `json:"caddy_installed"`
@@ -72,28 +71,28 @@ type LocalServiceStatus struct {
 	HasInstallPermission bool   `json:"has_install_permission"`
 	SSHPublicKey         string `json:"ssh_public_key"`
 	// FirewallMode is the persisted firewall strategy: "gopher", "manual", "none", or "" (not configured).
-	FirewallMode         string `json:"firewall_mode"`
+	FirewallMode string `json:"firewall_mode"`
 	// DashboardPrivate is true when the dashboard port is restricted to localhost (Caddy-only access).
-	DashboardPrivate     bool   `json:"dashboard_private"`
+	DashboardPrivate bool `json:"dashboard_private"`
 	// DashboardPort is the port Gopher's HTTP server listens on.
-	DashboardPort        int    `json:"dashboard_port"`
+	DashboardPort int `json:"dashboard_port"`
 	// OSUser is the OS username Gopher runs as (e.g. "gopher"). Used for
 	// path/ownership checks and as a fallback for jumpbox commands when
 	// the dedicated jumpbox user isn't installed yet (legacy deployments).
-	OSUser               string `json:"os_user"`
+	OSUser string `json:"os_user"`
 	// JumpboxUser is the dedicated, privilege-free user whose authorized_keys
 	// holds Gopher-managed keys. Frontend pre-fills SSH jumpbox commands
 	// with this. Empty string means the user hasn't been created yet — the
 	// frontend should warn the operator to re-run `gopher install`.
-	JumpboxUser          string `json:"jumpbox_user"`
+	JumpboxUser string `json:"jumpbox_user"`
 	// Fail2banSetupDone is true once fail2ban has been installed and configured
 	// by Gopher. Used to prompt existing installs to run the fail2ban setup step.
-	Fail2banSetupDone    bool     `json:"fail2ban_setup_done"`
+	Fail2banSetupDone bool `json:"fail2ban_setup_done"`
 	// BindIP is the IP address Gopher binds public listeners to. Empty = 0.0.0.0.
-	BindIP               string   `json:"bind_ip"`
+	BindIP string `json:"bind_ip"`
 	// HostIPs lists all non-loopback IPs detected on the host's network interfaces.
 	// Used by the frontend to warn when the host has multiple IPs and BindIP is unset.
-	HostIPs              []string `json:"host_ips"`
+	HostIPs []string `json:"host_ips"`
 	// RatholeNoisePubKey is the base64 X25519 server public key. Surfaced
 	// here (not behind a separate endpoint) so the dashboard can show it
 	// near the custom-services warning without an extra round trip. Operators
@@ -191,7 +190,17 @@ func (s *LocalSetupService) GenerateSSHKey(name string, setDefault bool) (*db.SS
 
 // AddSSHKey validates an uploaded key pair and stores it.
 func (s *LocalSetupService) AddSSHKey(name, privateKey, publicKey string, setDefault bool) (*db.SSHKey, error) {
-	if err := sshpkg.ValidateKeyPair(privateKey, publicKey); err != nil {
+	if publicKey == "" {
+		return nil, fmt.Errorf("public key is required")
+	}
+	// Private key is optional. Public-only keys are usable for authorized_keys
+	// and the jumpbox; the server just can't SSH with them (agent-managed). When
+	// a private key IS supplied, it must match the public key.
+	if privateKey == "" {
+		if err := sshpkg.ValidatePublicKey(publicKey); err != nil {
+			return nil, err
+		}
+	} else if err := sshpkg.ValidateKeyPair(privateKey, publicKey); err != nil {
 		return nil, err
 	}
 	return s.storeSSHKey(name, privateKey, publicKey, setDefault)
@@ -263,6 +272,25 @@ func (s *LocalSetupService) DownloadSSHKey(id string) (string, error) {
 		return "", fmt.Errorf("private key was deleted from the server; only the public key remains")
 	}
 	return key.PrivateKey, nil
+}
+
+// AddPrivateKey stores (or restores) the private half of an existing key,
+// verifying it matches the stored public key first. Lets an operator re-upload
+// a private key they previously deleted, or attach one to a public-only key —
+// no step-up needed: the match check means only the legitimate private key can
+// be added, so a session alone can't plant an arbitrary credential.
+func (s *LocalSetupService) AddPrivateKey(id, privateKey string) error {
+	key, err := db.GetSSHKey(id)
+	if err != nil {
+		return err
+	}
+	if privateKey == "" {
+		return fmt.Errorf("private key is required")
+	}
+	if err := sshpkg.ValidateKeyPair(privateKey, key.PublicKey); err != nil {
+		return fmt.Errorf("this private key does not match the stored public key: %w", err)
+	}
+	return db.SetSSHPrivateKey(id, privateKey)
 }
 
 // DeletePrivateKey clears the stored private half of a key while keeping the
@@ -439,8 +467,8 @@ func addToAuthorizedKeysFor(username, pubKey, options string) error {
 		if err2 := exec.Command("sudo", "mkdir", "-p", sshDir).Run(); err2 != nil { // #nosec G204
 			return fmt.Errorf("mkdir %s: %w", sshDir, err2)
 		}
-		_ = exec.Command("sudo", "chmod", "700", sshDir).Run()                       // #nosec G204
-		_ = exec.Command("sudo", "chown", username+":"+username, sshDir).Run()       // #nosec G204
+		_ = exec.Command("sudo", "chmod", "700", sshDir).Run()                 // #nosec G204
+		_ = exec.Command("sudo", "chown", username+":"+username, sshDir).Run() // #nosec G204
 	}
 
 	var existing []byte
@@ -492,8 +520,8 @@ func addToAuthorizedKeysFor(username, pubKey, options string) error {
 		if err2 := cmd.Run(); err2 != nil {
 			return err2
 		}
-		_ = exec.Command("sudo", "chmod", "600", path).Run()                       // #nosec G204
-		_ = exec.Command("sudo", "chown", username+":"+username, path).Run()       // #nosec G204
+		_ = exec.Command("sudo", "chmod", "600", path).Run()                 // #nosec G204
+		_ = exec.Command("sudo", "chown", username+":"+username, path).Run() // #nosec G204
 	}
 	return nil
 }
@@ -541,8 +569,8 @@ func removeFromAuthorizedKeysFor(username, pubKey string) error {
 		if err2 := cmd.Run(); err2 != nil {
 			return err2
 		}
-		_ = exec.Command("sudo", "chmod", "600", path).Run()                       // #nosec G204
-		_ = exec.Command("sudo", "chown", username+":"+username, path).Run()       // #nosec G204
+		_ = exec.Command("sudo", "chmod", "600", path).Run()                 // #nosec G204
+		_ = exec.Command("sudo", "chown", username+":"+username, path).Run() // #nosec G204
 	}
 	return nil
 }
@@ -797,7 +825,7 @@ func runLocalCmd(logWriter io.Writer, name string, args ...string) error {
 	cmd := exec.Command(name, args...) // #nosec G204
 	cmd.Stdout = logWriter
 	cmd.Stderr = logWriter
-	
+
 	if err := cmd.Run(); err != nil {
 		return err
 	}

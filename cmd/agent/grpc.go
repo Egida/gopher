@@ -237,10 +237,15 @@ func (s *agentServer) GetNetworkInfo(ctx context.Context, _ *agentpb.GetNetworkI
 	}, nil
 }
 
-// AddAuthorizedKey appends an SSH public key to a user's authorized_keys
-// (idempotent). Lets the server rotate operator keys onto an origin without
-// holding an SSH private key of its own. Bearer-token gated like every RPC.
-func (s *agentServer) AddAuthorizedKey(ctx context.Context, in *agentpb.AddAuthorizedKeyRequest) (*agentpb.AddAuthorizedKeyResponse, error) {
+// managedKeyMarker is the authorized_keys comment gopher tags its single managed
+// key with, so it can find + replace exactly its own key and never an operator's.
+const managedKeyMarker = "gopher-managed"
+
+// SetManagedKey makes public_key the ONE gopher-managed key in the user's
+// authorized_keys: it drops every prior gopher-managed line (comment == marker)
+// and writes this one, normalized to "type blob gopher-managed". Operator keys
+// are untouched; the file can't accumulate. Bearer-token gated.
+func (s *agentServer) SetManagedKey(ctx context.Context, in *agentpb.SetManagedKeyRequest) (*agentpb.SetManagedKeyResponse, error) {
 	user := strings.TrimSpace(in.GetUsername())
 	pubkey := strings.TrimSpace(in.GetPublicKey())
 	if user == "" || pubkey == "" {
@@ -251,21 +256,26 @@ func (s *agentServer) AddAuthorizedKey(ctx context.Context, in *agentpb.AddAutho
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	// Resolve the user's home, ensure ~/.ssh, append the key if absent. Prints
-	// "added" or "present" so we can report whether a write happened.
+	// Rebuild authorized_keys = (every non-managed line) + (this key, tagged).
+	// Atomic via temp+mv so there's no window where the file is missing keys.
 	script := `set -e
-u="$1"; pk="$2"
+u="$1"; pk="$2"; marker="$3"
 home=$(getent passwd "$u" | cut -d: -f6)
 [ -n "$home" ] || { echo "no home dir for user $u" >&2; exit 2; }
 mkdir -p "$home/.ssh"; touch "$home/.ssh/authorized_keys"
 chmod 700 "$home/.ssh"; chmod 600 "$home/.ssh/authorized_keys"
-if grep -qF "$pk" "$home/.ssh/authorized_keys"; then echo present; else printf '%s\n' "$pk" >> "$home/.ssh/authorized_keys"; echo added; fi
+ak="$home/.ssh/authorized_keys"
+line=$(printf '%s\n' "$pk" | awk -v m="$marker" 'NF>=2 {print $1, $2, m; exit}')
+[ -n "$line" ] || { echo "invalid public key" >&2; exit 3; }
+grep -v " $marker\$" "$ak" > "$ak.tmp" 2>/dev/null || true
+printf '%s\n' "$line" >> "$ak.tmp"
+mv "$ak.tmp" "$ak"
 chown -R "$u:$u" "$home/.ssh"`
-	out, err := exec.CommandContext(ctx, "sudo", "-n", "sh", "-c", script, "_", user, pubkey).CombinedOutput() // #nosec G204 — args are fixed positions
+	out, err := exec.CommandContext(ctx, "sudo", "-n", "sh", "-c", script, "_", user, pubkey, managedKeyMarker).CombinedOutput() // #nosec G204 — args are fixed positions
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "add authorized_key for %s: %v: %s", user, err, strings.TrimSpace(string(out)))
+		return nil, status.Errorf(codes.Internal, "set managed key for %s: %v: %s", user, err, strings.TrimSpace(string(out)))
 	}
-	return &agentpb.AddAuthorizedKeyResponse{Added: strings.Contains(string(out), "added")}, nil
+	return &agentpb.SetManagedKeyResponse{}, nil
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

@@ -46,9 +46,11 @@ const (
 	//
 	// 0.2.1: consolidate origin config under /etc/gopher (client.toml +
 	// config.env), migrated in place on first boot.
-	// 0.2.2: add GetNetworkInfo + AddAuthorizedKey RPCs so the server no longer
+	// 0.2.2: add GetNetworkInfo + SetManagedKey RPCs so the server no longer
 	// needs an SSH private key for network-info discovery or operator key
-	// rotation. Additive RPCs — older servers/agents ignore them — so
+	// rotation. SetManagedKey keeps exactly one gopher-managed key in
+	// authorized_keys (tagged `gopher-managed`), so the file can't accumulate
+	// stale keys. Additive RPCs — older agents return Unimplemented — so
 	// protocolVersion is unchanged.
 	agentVersion = "0.2.2"
 

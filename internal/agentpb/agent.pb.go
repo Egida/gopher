@@ -1040,28 +1040,28 @@ func (x *NetworkInfo) GetLanIp() string {
 	return ""
 }
 
-type AddAuthorizedKeyRequest struct {
+type SetManagedKeyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`                    // whose ~/.ssh/authorized_keys to append to
-	PublicKey     string                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // the authorized_keys line to add (idempotent)
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`                    // whose ~/.ssh/authorized_keys to manage
+	PublicKey     string                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // the key to become the single gopher-managed entry
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AddAuthorizedKeyRequest) Reset() {
-	*x = AddAuthorizedKeyRequest{}
+func (x *SetManagedKeyRequest) Reset() {
+	*x = SetManagedKeyRequest{}
 	mi := &file_agent_v1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AddAuthorizedKeyRequest) String() string {
+func (x *SetManagedKeyRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AddAuthorizedKeyRequest) ProtoMessage() {}
+func (*SetManagedKeyRequest) ProtoMessage() {}
 
-func (x *AddAuthorizedKeyRequest) ProtoReflect() protoreflect.Message {
+func (x *SetManagedKeyRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_agent_v1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1073,46 +1073,45 @@ func (x *AddAuthorizedKeyRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AddAuthorizedKeyRequest.ProtoReflect.Descriptor instead.
-func (*AddAuthorizedKeyRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use SetManagedKeyRequest.ProtoReflect.Descriptor instead.
+func (*SetManagedKeyRequest) Descriptor() ([]byte, []int) {
 	return file_agent_v1_agent_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *AddAuthorizedKeyRequest) GetUsername() string {
+func (x *SetManagedKeyRequest) GetUsername() string {
 	if x != nil {
 		return x.Username
 	}
 	return ""
 }
 
-func (x *AddAuthorizedKeyRequest) GetPublicKey() string {
+func (x *SetManagedKeyRequest) GetPublicKey() string {
 	if x != nil {
 		return x.PublicKey
 	}
 	return ""
 }
 
-type AddAuthorizedKeyResponse struct {
+type SetManagedKeyResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Added         bool                   `protobuf:"varint,1,opt,name=added,proto3" json:"added,omitempty"` // false when the key was already present
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AddAuthorizedKeyResponse) Reset() {
-	*x = AddAuthorizedKeyResponse{}
+func (x *SetManagedKeyResponse) Reset() {
+	*x = SetManagedKeyResponse{}
 	mi := &file_agent_v1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AddAuthorizedKeyResponse) String() string {
+func (x *SetManagedKeyResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AddAuthorizedKeyResponse) ProtoMessage() {}
+func (*SetManagedKeyResponse) ProtoMessage() {}
 
-func (x *AddAuthorizedKeyResponse) ProtoReflect() protoreflect.Message {
+func (x *SetManagedKeyResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_agent_v1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1124,16 +1123,9 @@ func (x *AddAuthorizedKeyResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AddAuthorizedKeyResponse.ProtoReflect.Descriptor instead.
-func (*AddAuthorizedKeyResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use SetManagedKeyResponse.ProtoReflect.Descriptor instead.
+func (*SetManagedKeyResponse) Descriptor() ([]byte, []int) {
 	return file_agent_v1_agent_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *AddAuthorizedKeyResponse) GetAdded() bool {
-	if x != nil {
-		return x.Added
-	}
-	return false
 }
 
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
@@ -1204,13 +1196,12 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x15GetNetworkInfoRequest\";\n" +
 	"\vNetworkInfo\x12\x15\n" +
 	"\x06wan_ip\x18\x01 \x01(\tR\x05wanIp\x12\x15\n" +
-	"\x06lan_ip\x18\x02 \x01(\tR\x05lanIp\"T\n" +
-	"\x17AddAuthorizedKeyRequest\x12\x1a\n" +
+	"\x06lan_ip\x18\x02 \x01(\tR\x05lanIp\"Q\n" +
+	"\x14SetManagedKeyRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x02 \x01(\tR\tpublicKey\"0\n" +
-	"\x18AddAuthorizedKeyResponse\x12\x14\n" +
-	"\x05added\x18\x01 \x01(\bR\x05added2\x81\x06\n" +
+	"public_key\x18\x02 \x01(\tR\tpublicKey\"\x17\n" +
+	"\x15SetManagedKeyResponse2\xf8\x05\n" +
 	"\fAgentControl\x12@\n" +
 	"\n" +
 	"GetVersion\x12\x1b.agent.v1.GetVersionRequest\x1a\x15.agent.v1.VersionInfo\x12=\n" +
@@ -1221,8 +1212,8 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x10PutRatholeConfig\x12\x17.agent.v1.RatholeConfig\x1a\".agent.v1.PutRatholeConfigResponse\x12J\n" +
 	"\vDiagnostics\x12\x1c.agent.v1.DiagnosticsRequest\x1a\x1d.agent.v1.DiagnosticsResponse\x12D\n" +
 	"\tUninstall\x12\x1a.agent.v1.UninstallRequest\x1a\x1b.agent.v1.UninstallResponse\x12H\n" +
-	"\x0eGetNetworkInfo\x12\x1f.agent.v1.GetNetworkInfoRequest\x1a\x15.agent.v1.NetworkInfo\x12Y\n" +
-	"\x10AddAuthorizedKey\x12!.agent.v1.AddAuthorizedKeyRequest\x1a\".agent.v1.AddAuthorizedKeyResponseB5Z3github.com/smalex-z/gopher/internal/agentpb;agentpbb\x06proto3"
+	"\x0eGetNetworkInfo\x12\x1f.agent.v1.GetNetworkInfoRequest\x1a\x15.agent.v1.NetworkInfo\x12P\n" +
+	"\rSetManagedKey\x12\x1e.agent.v1.SetManagedKeyRequest\x1a\x1f.agent.v1.SetManagedKeyResponseB5Z3github.com/smalex-z/gopher/internal/agentpb;agentpbb\x06proto3"
 
 var (
 	file_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -1257,8 +1248,8 @@ var file_agent_v1_agent_proto_goTypes = []any{
 	(*UninstallResponse)(nil),        // 16: agent.v1.UninstallResponse
 	(*GetNetworkInfoRequest)(nil),    // 17: agent.v1.GetNetworkInfoRequest
 	(*NetworkInfo)(nil),              // 18: agent.v1.NetworkInfo
-	(*AddAuthorizedKeyRequest)(nil),  // 19: agent.v1.AddAuthorizedKeyRequest
-	(*AddAuthorizedKeyResponse)(nil), // 20: agent.v1.AddAuthorizedKeyResponse
+	(*SetManagedKeyRequest)(nil),     // 19: agent.v1.SetManagedKeyRequest
+	(*SetManagedKeyResponse)(nil),    // 20: agent.v1.SetManagedKeyResponse
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.StatusInfo.rathole:type_name -> agent.v1.RatholeStatus
@@ -1273,7 +1264,7 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	12, // 9: agent.v1.AgentControl.Diagnostics:input_type -> agent.v1.DiagnosticsRequest
 	15, // 10: agent.v1.AgentControl.Uninstall:input_type -> agent.v1.UninstallRequest
 	17, // 11: agent.v1.AgentControl.GetNetworkInfo:input_type -> agent.v1.GetNetworkInfoRequest
-	19, // 12: agent.v1.AgentControl.AddAuthorizedKey:input_type -> agent.v1.AddAuthorizedKeyRequest
+	19, // 12: agent.v1.AgentControl.SetManagedKey:input_type -> agent.v1.SetManagedKeyRequest
 	1,  // 13: agent.v1.AgentControl.GetVersion:output_type -> agent.v1.VersionInfo
 	4,  // 14: agent.v1.AgentControl.GetStatus:output_type -> agent.v1.StatusInfo
 	4,  // 15: agent.v1.AgentControl.WatchStatus:output_type -> agent.v1.StatusInfo
@@ -1283,7 +1274,7 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	13, // 19: agent.v1.AgentControl.Diagnostics:output_type -> agent.v1.DiagnosticsResponse
 	16, // 20: agent.v1.AgentControl.Uninstall:output_type -> agent.v1.UninstallResponse
 	18, // 21: agent.v1.AgentControl.GetNetworkInfo:output_type -> agent.v1.NetworkInfo
-	20, // 22: agent.v1.AgentControl.AddAuthorizedKey:output_type -> agent.v1.AddAuthorizedKeyResponse
+	20, // 22: agent.v1.AgentControl.SetManagedKey:output_type -> agent.v1.SetManagedKeyResponse
 	13, // [13:23] is the sub-list for method output_type
 	3,  // [3:13] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name

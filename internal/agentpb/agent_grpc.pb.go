@@ -39,7 +39,7 @@ const (
 	AgentControl_Diagnostics_FullMethodName      = "/agent.v1.AgentControl/Diagnostics"
 	AgentControl_Uninstall_FullMethodName        = "/agent.v1.AgentControl/Uninstall"
 	AgentControl_GetNetworkInfo_FullMethodName   = "/agent.v1.AgentControl/GetNetworkInfo"
-	AgentControl_AddAuthorizedKey_FullMethodName = "/agent.v1.AgentControl/AddAuthorizedKey"
+	AgentControl_SetManagedKey_FullMethodName    = "/agent.v1.AgentControl/SetManagedKey"
 )
 
 // AgentControlClient is the client API for AgentControl service.
@@ -80,10 +80,13 @@ type AgentControlClient interface {
 	// info without SSHing into the origin. (Added in agent 0.2.2; older agents
 	// return Unimplemented and the server falls back to SSH.)
 	GetNetworkInfo(ctx context.Context, in *GetNetworkInfoRequest, opts ...grpc.CallOption) (*NetworkInfo, error)
-	// AddAuthorizedKey appends an SSH public key to a user's authorized_keys
-	// (idempotent), so operator key rotation doesn't need the server to hold an
-	// SSH private key. (Added in agent 0.2.2; older agents return Unimplemented.)
-	AddAuthorizedKey(ctx context.Context, in *AddAuthorizedKeyRequest, opts ...grpc.CallOption) (*AddAuthorizedKeyResponse, error)
+	// SetManagedKey makes public_key the ONE gopher-managed key in a user's
+	// authorized_keys: it removes every prior gopher-managed key (tagged with the
+	// `gopher-managed` comment) and adds this one. Operator-owned keys are never
+	// touched. Lets key rotation happen without the server holding an SSH private
+	// key, and keeps authorized_keys from accumulating stale keys. (Added in agent
+	// 0.2.2; older agents return Unimplemented.)
+	SetManagedKey(ctx context.Context, in *SetManagedKeyRequest, opts ...grpc.CallOption) (*SetManagedKeyResponse, error)
 }
 
 type agentControlClient struct {
@@ -193,10 +196,10 @@ func (c *agentControlClient) GetNetworkInfo(ctx context.Context, in *GetNetworkI
 	return out, nil
 }
 
-func (c *agentControlClient) AddAuthorizedKey(ctx context.Context, in *AddAuthorizedKeyRequest, opts ...grpc.CallOption) (*AddAuthorizedKeyResponse, error) {
+func (c *agentControlClient) SetManagedKey(ctx context.Context, in *SetManagedKeyRequest, opts ...grpc.CallOption) (*SetManagedKeyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AddAuthorizedKeyResponse)
-	err := c.cc.Invoke(ctx, AgentControl_AddAuthorizedKey_FullMethodName, in, out, cOpts...)
+	out := new(SetManagedKeyResponse)
+	err := c.cc.Invoke(ctx, AgentControl_SetManagedKey_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -241,10 +244,13 @@ type AgentControlServer interface {
 	// info without SSHing into the origin. (Added in agent 0.2.2; older agents
 	// return Unimplemented and the server falls back to SSH.)
 	GetNetworkInfo(context.Context, *GetNetworkInfoRequest) (*NetworkInfo, error)
-	// AddAuthorizedKey appends an SSH public key to a user's authorized_keys
-	// (idempotent), so operator key rotation doesn't need the server to hold an
-	// SSH private key. (Added in agent 0.2.2; older agents return Unimplemented.)
-	AddAuthorizedKey(context.Context, *AddAuthorizedKeyRequest) (*AddAuthorizedKeyResponse, error)
+	// SetManagedKey makes public_key the ONE gopher-managed key in a user's
+	// authorized_keys: it removes every prior gopher-managed key (tagged with the
+	// `gopher-managed` comment) and adds this one. Operator-owned keys are never
+	// touched. Lets key rotation happen without the server holding an SSH private
+	// key, and keeps authorized_keys from accumulating stale keys. (Added in agent
+	// 0.2.2; older agents return Unimplemented.)
+	SetManagedKey(context.Context, *SetManagedKeyRequest) (*SetManagedKeyResponse, error)
 	mustEmbedUnimplementedAgentControlServer()
 }
 
@@ -282,8 +288,8 @@ func (UnimplementedAgentControlServer) Uninstall(context.Context, *UninstallRequ
 func (UnimplementedAgentControlServer) GetNetworkInfo(context.Context, *GetNetworkInfoRequest) (*NetworkInfo, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetNetworkInfo not implemented")
 }
-func (UnimplementedAgentControlServer) AddAuthorizedKey(context.Context, *AddAuthorizedKeyRequest) (*AddAuthorizedKeyResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method AddAuthorizedKey not implemented")
+func (UnimplementedAgentControlServer) SetManagedKey(context.Context, *SetManagedKeyRequest) (*SetManagedKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetManagedKey not implemented")
 }
 func (UnimplementedAgentControlServer) mustEmbedUnimplementedAgentControlServer() {}
 func (UnimplementedAgentControlServer) testEmbeddedByValue()                      {}
@@ -461,20 +467,20 @@ func _AgentControl_GetNetworkInfo_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _AgentControl_AddAuthorizedKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AddAuthorizedKeyRequest)
+func _AgentControl_SetManagedKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetManagedKeyRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AgentControlServer).AddAuthorizedKey(ctx, in)
+		return srv.(AgentControlServer).SetManagedKey(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: AgentControl_AddAuthorizedKey_FullMethodName,
+		FullMethod: AgentControl_SetManagedKey_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentControlServer).AddAuthorizedKey(ctx, req.(*AddAuthorizedKeyRequest))
+		return srv.(AgentControlServer).SetManagedKey(ctx, req.(*SetManagedKeyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -519,8 +525,8 @@ var AgentControl_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AgentControl_GetNetworkInfo_Handler,
 		},
 		{
-			MethodName: "AddAuthorizedKey",
-			Handler:    _AgentControl_AddAuthorizedKey_Handler,
+			MethodName: "SetManagedKey",
+			Handler:    _AgentControl_SetManagedKey_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

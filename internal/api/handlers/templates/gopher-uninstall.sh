@@ -141,23 +141,26 @@ if [ "$NOTIFIED" != "1" ]; then
   echo "  → Open the dashboard and remove this machine manually so its record doesn't linger."
 fi
 
-# Remove the VPS SSH public key from authorized_keys so the server can no
-# longer SSH back into this machine.
-if [ -f "$VPS_KEY_FILE" ]; then
-  VPS_KEY=$(cat "$VPS_KEY_FILE" 2>/dev/null)
-  if [ -n "$VPS_KEY" ]; then
-    KEY_BLOB=$(echo "$VPS_KEY" | awk '{print $2}')
-    AK="$REAL_HOME/.ssh/authorized_keys"
-    if [ -n "$KEY_BLOB" ] && [ -f "$AK" ]; then
-      _tmp=$(mktemp)
-      grep -vF "$KEY_BLOB" "$AK" > "$_tmp" 2>/dev/null || true
-      # Use cat redirect to preserve the original file's ownership/permissions.
-      # mv would change ownership to root when run via sudo.
-      cat "$_tmp" > "$AK" 2>/dev/null || mv "$_tmp" "$AK" 2>/dev/null || true
-      rm -f "$_tmp" 2>/dev/null || true
-      echo "Removed VPS SSH key from authorized_keys"
+# Remove Gopher's managed SSH key(s) from authorized_keys so the server can no
+# longer SSH back in. Match on the `gopher-managed` marker comment (self-healing:
+# clears every managed key, current or stale) and, for older installs whose key
+# predates the marker, also match the specific blob from vps_key.pub. Operator
+# keys (no marker) are never touched.
+AK="$REAL_HOME/.ssh/authorized_keys"
+if [ -f "$AK" ]; then
+  _tmp=$(mktemp)
+  grep -v ' gopher-managed$' "$AK" > "$_tmp" 2>/dev/null || true
+  if [ -f "$VPS_KEY_FILE" ]; then
+    KEY_BLOB=$(awk '{print $2}' "$VPS_KEY_FILE" 2>/dev/null)
+    if [ -n "$KEY_BLOB" ]; then
+      grep -vF "$KEY_BLOB" "$_tmp" > "$_tmp.2" 2>/dev/null && mv "$_tmp.2" "$_tmp" || true
     fi
   fi
+  # cat redirect preserves the file's ownership/permissions (mv under sudo would
+  # chown it to root).
+  cat "$_tmp" > "$AK" 2>/dev/null || mv "$_tmp" "$AK" 2>/dev/null || true
+  rm -f "$_tmp" 2>/dev/null || true
+  echo "Removed Gopher-managed SSH key(s) from authorized_keys"
 fi
 
 echo "Stopping gopher-agent service..."

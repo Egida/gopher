@@ -731,10 +731,10 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
     setLoading(true)
     try {
       await localApi.uploadSSHKey(keyName || 'Uploaded key', privKeyText, pubKeyText, true)
-      toast.success('SSH key pair saved')
+      toast.success(privKeyText ? 'SSH key pair saved' : 'Public key saved')
       onDone()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Invalid key pair — ensure private and public keys match')
+      toast.error(err instanceof Error ? err.message : 'Invalid key — check the format')
     } finally {
       setLoading(false)
     }
@@ -864,39 +864,43 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
       </div>
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Private key <span className="text-gray-400 font-normal">(id_rsa — PEM or OpenSSH format)</span>
-        </label>
-        <div className="flex gap-2">
-          <textarea
-            value={privKeyText}
-            onChange={e => setPrivKeyText(e.target.value)}
-            rows={5}
-            placeholder={'-----BEGIN RSA PRIVATE KEY-----\n...'}
-            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <label className="cursor-pointer flex flex-col items-center justify-center px-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-500 text-xs gap-1">
-            <Upload size={14} />
-            Browse
-            <input type="file" className="hidden" onChange={e => { if (e.target.files?.[0]) readFile(e.target.files[0], setPrivKeyText) }} />
-          </label>
-        </div>
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Public key <span className="text-gray-400 font-normal">(id_rsa.pub — authorized_keys format)</span>
+          Public key <span className="text-red-500">*</span>{' '}
+          <span className="text-gray-400 font-normal">(id_rsa.pub — authorized_keys format)</span>
         </label>
         <div className="flex gap-2">
           <textarea
             value={pubKeyText}
             onChange={e => setPubKeyText(e.target.value)}
             rows={3}
-            placeholder="ssh-rsa AAAA..."
+            placeholder="ssh-rsa AAAA... or ssh-ed25519 AAAA..."
             className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <label className="cursor-pointer flex flex-col items-center justify-center px-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-500 text-xs gap-1">
             <Upload size={14} />
             Browse
             <input type="file" className="hidden" onChange={e => { if (e.target.files?.[0]) readFile(e.target.files[0], setPubKeyText) }} />
+          </label>
+        </div>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Private key <span className="text-gray-400 font-normal">(optional — id_rsa, PEM or OpenSSH format)</span>
+        </label>
+        <p className="text-xs text-gray-400 mb-1">
+          Leave blank for a public-only key. Add it only if you want the server to SSH with this key or to download it later.
+        </p>
+        <div className="flex gap-2">
+          <textarea
+            value={privKeyText}
+            onChange={e => setPrivKeyText(e.target.value)}
+            rows={5}
+            placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n...'}
+            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <label className="cursor-pointer flex flex-col items-center justify-center px-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-500 text-xs gap-1">
+            <Upload size={14} />
+            Browse
+            <input type="file" className="hidden" onChange={e => { if (e.target.files?.[0]) readFile(e.target.files[0], setPrivKeyText) }} />
           </label>
         </div>
       </div>
@@ -909,10 +913,10 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
         </button>
         <button
           onClick={handleUploadSave}
-          disabled={loading || !privKeyText || !pubKeyText}
+          disabled={loading || !pubKeyText}
           className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {loading ? 'Validating…' : 'Save key pair'}
+          {loading ? 'Validating…' : (privKeyText ? 'Save key pair' : 'Save public key')}
         </button>
       </div>
     </div>

@@ -129,6 +129,7 @@ func NewRouter(
 					r.Get("/challenge-info", localH.SSHKeyChallengeInfo)
 					r.Post("/{id}/download", localH.DownloadSSHKey)
 					r.Post("/{id}/delete-private", localH.DeletePrivateKey)
+					r.Post("/{id}/private", localH.AddPrivateKey)
 				})
 			})
 

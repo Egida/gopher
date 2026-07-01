@@ -377,9 +377,10 @@ func (s *MachineService) finalizeNetworkInfo(machine *db.Machine, publicIP, priv
 	}
 }
 
-// ReassignSSHKey installs newKeyID's public key on the machine (via its current
-// key) and updates the machine record. The old key is left in authorized_keys so
-// access is never lost if something goes wrong.
+// ReassignSSHKey makes newKeyID the machine's single gopher-managed authorized
+// key: the new key is installed and every prior gopher-managed key is removed,
+// so the origin's authorized_keys never accumulates stale keys. The operator's
+// own (non-gopher) keys are never touched.
 func (s *MachineService) ReassignSSHKey(machineID, newKeyID string) error {
 	machine, err := db.GetMachine(machineID)
 	if err != nil {
@@ -389,18 +390,16 @@ func (s *MachineService) ReassignSSHKey(machineID, newKeyID string) error {
 	if err != nil {
 		return err
 	}
-
 	if machine.TunnelPort == 0 {
 		return fmt.Errorf("machine has no active tunnel — cannot push key")
 	}
 
-	// Agent-first: append the new pubkey via the agent — no SSH, no stored
-	// private key needed. On agents older than 0.2.2 this errors (Unimplemented)
-	// and we fall through to the SSH path.
+	// Agent-first: set the single managed key — no SSH, no stored private key
+	// needed. Older agents (<0.2.2) error (Unimplemented) and we fall through.
 	installed := false
 	if machine.AgentInstalled && machine.AgentRemotePort > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		aerr := NewAgentClient(machine).AddAuthorizedKey(ctx, machine.Username, newKey.PublicKey)
+		aerr := NewAgentClient(machine).SetManagedKey(ctx, machine.Username, newKey.PublicKey)
 		cancel()
 		if aerr == nil {
 			installed = true
@@ -421,11 +420,7 @@ func (s *MachineService) ReassignSSHKey(machineID, newKeyID string) error {
 			return fmt.Errorf("failed to connect to machine: %w", err)
 		}
 		defer client.Close()
-		appendCmd := fmt.Sprintf(
-			`grep -qF %q ~/.ssh/authorized_keys 2>/dev/null || echo %q >> ~/.ssh/authorized_keys`,
-			newKey.PublicKey, newKey.PublicKey,
-		)
-		if _, err := client.Execute(appendCmd); err != nil {
+		if _, err := client.Execute(setManagedKeyShell(newKey.PublicKey)); err != nil {
 			return fmt.Errorf("failed to install new key on machine: %w", err)
 		}
 	}
@@ -433,4 +428,25 @@ func (s *MachineService) ReassignSSHKey(machineID, newKeyID string) error {
 	machine.SSHKeyID = newKeyID
 	machine.UpdatedAt = time.Now()
 	return db.UpdateMachine(machine)
+}
+
+// managedKeyMarker tags gopher's single managed authorized_keys entry so it can
+// be found + replaced without touching operator-owned keys. Kept in sync with
+// cmd/agent's managedKeyMarker and bootstrap.sh's marker.
+const managedKeyMarker = "gopher-managed"
+
+// setManagedKeyShell builds a shell snippet that makes pubKey the single
+// gopher-managed key in ~/.ssh/authorized_keys: it strips every prior managed
+// line (comment == marker) and writes this key tagged with the marker,
+// atomically. Same logic as the agent's SetManagedKey, for the SSH fallback.
+func setManagedKeyShell(pubKey string) string {
+	// %q quotes for the shell the same way the rest of this file does; the awk
+	// program normalizes the key to "type blob <marker>".
+	return fmt.Sprintf(
+		`ak=~/.ssh/authorized_keys; mkdir -p ~/.ssh; touch "$ak"; chmod 700 ~/.ssh; chmod 600 "$ak"; `+
+			`line=$(printf '%%s\n' %q | awk '{print $1, $2, %q; exit}'); `+
+			`grep -v " %s$" "$ak" > "$ak.tmp" 2>/dev/null || true; `+
+			`printf '%%s\n' "$line" >> "$ak.tmp"; mv "$ak.tmp" "$ak"`,
+		pubKey, managedKeyMarker, managedKeyMarker,
+	)
 }

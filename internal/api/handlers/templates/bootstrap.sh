@@ -146,14 +146,20 @@ fi
 echo "Registered! Tunnel port: $TUNNEL_PORT"
 
 # ── Install VPS SSH key ───────────────────────────────────────────────────────
+# Gopher manages exactly ONE key, tagged with the `gopher-managed` comment. We
+# drop any prior gopher-managed key and write this one, so re-bootstraps never
+# accumulate stale server keys. Operator-owned keys (any without the marker) are
+# left untouched.
 echo "Installing server SSH key to authorized_keys..."
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
 touch ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
-if ! grep -qF "$VPS_PUBLIC_KEY" ~/.ssh/authorized_keys 2>/dev/null; then
-  echo "$VPS_PUBLIC_KEY" >> ~/.ssh/authorized_keys
-fi
+MANAGED_LINE=$(printf '%s\n' "$VPS_PUBLIC_KEY" | awk 'NF>=2 {print $1, $2, "gopher-managed"; exit}')
+grep -v ' gopher-managed$' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp 2>/dev/null || true
+printf '%s\n' "$MANAGED_LINE" >> ~/.ssh/authorized_keys.tmp
+mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
 
 # ── Install rathole binary ────────────────────────────────────────────────────
 echo "Installing rathole..."
