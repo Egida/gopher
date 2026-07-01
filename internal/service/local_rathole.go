@@ -235,10 +235,34 @@ func (s *LocalSetupService) updateClientToml(machine *db.Machine, transform func
 		log.Printf("agent client.toml push failed for machine %s (%s): %v — falling back to SSH", machine.ID, machine.Name, pushErr)
 	}
 
+	// SSH fallback only when a usable private key is stored. When the operator
+	// has deleted the private key (public-only), there's no SSH transport — the
+	// agent is the sole path. Return so the caller flags ConfigPushPending and
+	// the health loop retries via the agent on reconnect.
+	if !machineHasSSHPrivateKey(machine) {
+		if pushErr == nil {
+			pushErr = fmt.Errorf("no agent and no stored SSH private key for %s — config push deferred", machine.Name)
+		}
+		return pushErr
+	}
+
 	if pushErr = s.updateClientTomlViaSSH(machine, transform); pushErr == nil {
 		clearConfigPushPending(machine)
 	}
 	return pushErr
+}
+
+// machineHasSSHPrivateKey reports whether the server holds a usable SSH private
+// key for this machine — i.e. it can still act as an SSH client into the origin.
+// False when no key is assigned or the operator deleted the private half
+// (public-only). Server→origin control runs over the agent; SSH is an optional
+// fallback, so callers gate on this rather than attempting a doomed SSH dial.
+func machineHasSSHPrivateKey(machine *db.Machine) bool {
+	if machine == nil {
+		return false
+	}
+	key, err := db.GetSSHKeyForMachine(machine)
+	return err == nil && key != nil && key.PrivateKey != ""
 }
 
 // clearConfigPushPending is the success-hook for any client.toml push path.
@@ -452,6 +476,9 @@ func (s *LocalSetupService) removeMachineClientViaSSH(machine *db.Machine) error
 	sshKey, err := db.GetSSHKeyForMachine(machine)
 	if err != nil {
 		return fmt.Errorf("no server SSH key available")
+	}
+	if sshKey.PrivateKey == "" {
+		return fmt.Errorf("no stored SSH private key (public-only) — client teardown runs via the agent")
 	}
 
 	sshClient, err := sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, sshKey.PrivateKey)

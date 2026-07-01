@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -239,17 +240,32 @@ func (s *MachineService) Status(id string) (map[string]interface{}, error) {
 		return nil, err
 	}
 
+	// Prefer the agent: if it's installed, its live status already covers
+	// rathole-client state without any SSH. Only reach for SSH when there's no
+	// agent AND a usable private key is stored.
+	if machine.AgentInstalled && machine.AgentRemotePort > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if st, aerr := NewAgentClient(machine).Status(ctx); aerr == nil {
+			return map[string]interface{}{
+				"id":             id,
+				"connected":      true,
+				"rathole_status": map[bool]string{true: "active", false: "inactive"}[st.Rathole.Active],
+			}, nil
+		}
+	}
+
 	var client *sshpkg.SSHClient
-	if machine.TunnelPort > 0 {
+	if machine.TunnelPort > 0 && machineHasSSHPrivateKey(machine) {
 		if sshKey, kerr := db.GetSSHKeyForMachine(machine); kerr == nil {
 			client, err = sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, sshKey.PrivateKey)
 		}
 	}
 	if client == nil {
-		if machine.Host != "" {
+		if machine.Host != "" && machine.PrivateKey != "" {
 			client, err = sshpkg.NewClient(machine.Host, machine.Port, machine.Username, machine.PrivateKey)
 		} else {
-			return map[string]interface{}{"id": id, "connected": false, "error": "no ssh access method"}, nil
+			return map[string]interface{}{"id": id, "connected": false, "error": "no agent and no stored SSH private key"}, nil
 		}
 	}
 	if err != nil {
@@ -280,6 +296,13 @@ func (s *MachineService) RefreshNetworkInfo(id string) (map[string]interface{}, 
 	machine, err := db.GetMachine(id)
 	if err != nil {
 		return nil, err
+	}
+
+	// Network-info discovery is one of the few ops still done over SSH (the agent
+	// doesn't report WAN/LAN IP yet). It needs a stored private key; when the
+	// operator has gone public-only, surface that clearly instead of a dial error.
+	if machine.TunnelPort > 0 && !machineHasSSHPrivateKey(machine) && machine.PrivateKey == "" {
+		return map[string]interface{}{"id": id, "error": "network-info discovery needs a stored SSH private key (this machine is public-only / agent-managed)"}, nil
 	}
 
 	var client *sshpkg.SSHClient
@@ -363,6 +386,9 @@ func (s *MachineService) ReassignSSHKey(machineID, newKeyID string) error {
 	}
 	if machine.TunnelPort == 0 {
 		return fmt.Errorf("machine has no active tunnel — cannot push key")
+	}
+	if currentKey.PrivateKey == "" {
+		return fmt.Errorf("current key is public-only (private deleted) — cannot SSH to install the new key; re-bootstrap the machine to rotate keys")
 	}
 	client, err := sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, currentKey.PrivateKey)
 	if err != nil {

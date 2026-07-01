@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Key, Download, Trash2, Star, Upload, RefreshCw, Copy, Check, Plus } from 'lucide-react'
+import { Key, KeyRound, Download, Trash2, Star, Upload, RefreshCw, Copy, Check, Plus } from 'lucide-react'
 import { localApi } from '../api/local'
 import { toast } from '../lib/toast'
 import type { SSHKey } from '../types'
 import DownloadKeyButton from '../components/DownloadKeyButton'
+import DeletePrivateKeyButton from '../components/DeletePrivateKeyButton'
 
 const toKeyFilename = (name: string) =>
   name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '')
@@ -351,6 +352,11 @@ export default function SSHKeysPage() {
                           {key.machine_count} machine{key.machine_count !== 1 ? 's' : ''}
                         </span>
                       )}
+                      {key.has_private_key === false && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" title="Private key deleted — public key only">
+                          <KeyRound size={10} /> Public-only
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell">
@@ -360,11 +366,20 @@ export default function SSHKeysPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <CopyPublicKeyButton publicKey={key.public_key} />
-                      <DownloadKeyButton
-                        id={key.id}
-                        name={key.name}
-                        className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                      />
+                      {key.has_private_key !== false && (
+                        <>
+                          <DownloadKeyButton
+                            id={key.id}
+                            name={key.name}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                          />
+                          <DeletePrivateKeyButton
+                            id={key.id}
+                            name={key.name}
+                            className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          />
+                        </>
+                      )}
 
                       <button
                         onClick={() => setDefaultMutation.mutate(key.id)}

@@ -400,6 +400,15 @@ func DeleteSSHKeyByID(id string) error {
 	return DB.Delete(&SSHKey{}, "id = ?", id).Error
 }
 
+// BlankSSHPrivateKey clears the stored private key for a key while keeping the
+// public key (and the row) intact. Column-level update so it can't touch other
+// fields. Used by "delete private key" — the server can still hand the public
+// key to authorized_keys / the jumpbox, it just no longer holds a secret that
+// could SSH into origins.
+func BlankSSHPrivateKey(id string) error {
+	return DB.Model(&SSHKey{}).Where("id = ?", id).Update("private_key", "").Error
+}
+
 func SetDefaultSSHKey(id string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&SSHKey{}).Where("is_default = ?", true).Update("is_default", false).Error; err != nil {
@@ -720,15 +729,15 @@ func GetRecentEvents(limit int) ([]Event, error) {
 // EventFilter narrows GetEvents queries. Empty fields mean "no filter on this
 // dimension".
 type EventFilter struct {
-	Sources      []string  // any of these (OR'd). Empty = all sources.
-	Severity     string    // exact match: info | warn | error | critical
-	MinSeverity  string    // returns events at or above this severity
-	ResourceID   string
-	Search       string    // case-insensitive substring match on message, resource_name, kind
-	Since        time.Time // CreatedAt >=
-	Until        time.Time // CreatedAt <=
-	Before       time.Time // cursor pagination — strictly < (use the oldest CreatedAt from the previous page)
-	Limit        int       // 0 means default (200)
+	Sources     []string // any of these (OR'd). Empty = all sources.
+	Severity    string   // exact match: info | warn | error | critical
+	MinSeverity string   // returns events at or above this severity
+	ResourceID  string
+	Search      string    // case-insensitive substring match on message, resource_name, kind
+	Since       time.Time // CreatedAt >=
+	Until       time.Time // CreatedAt <=
+	Before      time.Time // cursor pagination — strictly < (use the oldest CreatedAt from the previous page)
+	Limit       int       // 0 means default (200)
 
 	// Source is a back-compat single-value form. Prefer Sources for new code.
 	Source string

@@ -128,6 +128,7 @@ func NewRouter(
 					// of GET so the request body can carry the credential.
 					r.Get("/challenge-info", localH.SSHKeyChallengeInfo)
 					r.Post("/{id}/download", localH.DownloadSSHKey)
+					r.Post("/{id}/delete-private", localH.DeletePrivateKey)
 				})
 			})
 

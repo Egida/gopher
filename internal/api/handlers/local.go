@@ -264,6 +264,30 @@ func (h *LocalHandler) DownloadSSHKey(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(key))
 }
 
+// POST /api/local/ssh-keys/{id}/delete-private — clear the stored private key,
+// keeping the public key. Gated behind the same step-up challenge as download:
+// it's irreversible and destroys a credential, so a stolen session cookie alone
+// must not be able to do it.
+func (h *LocalHandler) DeletePrivateKey(w http.ResponseWriter, r *http.Request) {
+	var req service.SensitiveOpChallenge
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+	ip := service.ClientIP(r)
+	if err := h.auth.VerifySensitiveOp(req, ip); err != nil {
+		response.Error(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.svc.DeletePrivateKey(id); err != nil {
+		response.BadRequest(w, err.Error())
+		return
+	}
+	h.auth.LogAuditEvent("SSH_KEY_PRIVATE_DELETED", fmt.Sprintf("%s key=%s", ip, id))
+	response.Success(w, map[string]string{"message": "private key deleted; public key kept"})
+}
+
 // GET /api/local/ssh-keys/challenge-info — tells the dashboard which credential
 // to prompt for in the re-auth modal. "totp" when 2FA is enrolled, otherwise
 // "password". No secrets returned.
@@ -468,7 +492,6 @@ func (h *LocalHandler) Activity(w http.ResponseWriter, r *http.Request) {
 	}
 	response.Success(w, merged)
 }
-
 
 // validDomain matches a reasonable FQDN: labels of alphanumeric + hyphens separated by dots.
 var validDomain = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)

@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // randomID returns a 16-character hex string (8 bytes of entropy). Used as the
@@ -78,10 +80,10 @@ type Machine struct {
 	// Set by the noise migration's failure path; intended to be general — any
 	// future push path that fails to land should set this rather than logging
 	// and moving on.
-	ConfigPushPending bool       `json:"config_push_pending,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	Tunnels           []Tunnel   `json:"tunnels,omitempty" gorm:"foreignKey:MachineID"`
+	ConfigPushPending bool      `json:"config_push_pending,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	Tunnels           []Tunnel  `json:"tunnels,omitempty" gorm:"foreignKey:MachineID"`
 }
 
 // HealthCheck records the result of a single agent or tunnel probe. Used by
@@ -97,29 +99,29 @@ type HealthCheck struct {
 }
 
 type Tunnel struct {
-	ID           string    `json:"id" gorm:"primaryKey"`
-	MachineID    string    `json:"machine_id"`
-	Name         string    `json:"name"`
-	Subdomain    string    `json:"subdomain"`
-	LocalPort    int       `json:"local_port"`
-	RatholePort  int       `json:"rathole_port"`
-	RatholeToken string    `json:"rathole_token"`
-	Protocol     string    `json:"protocol"`
-	Transport    string    `json:"transport"`  // "tcp" (default) or "udp"
-	NoTLS        bool      `json:"no_tls"`     // skip Caddy HTTPS; use plain http://
-	Private      bool      `json:"private"`    // bind 127.0.0.1 (VPS-local only) instead of 0.0.0.0
+	ID           string `json:"id" gorm:"primaryKey"`
+	MachineID    string `json:"machine_id"`
+	Name         string `json:"name"`
+	Subdomain    string `json:"subdomain"`
+	LocalPort    int    `json:"local_port"`
+	RatholePort  int    `json:"rathole_port"`
+	RatholeToken string `json:"rathole_token"`
+	Protocol     string `json:"protocol"`
+	Transport    string `json:"transport"` // "tcp" (default) or "udp"
+	NoTLS        bool   `json:"no_tls"`    // skip Caddy HTTPS; use plain http://
+	Private      bool   `json:"private"`   // bind 127.0.0.1 (VPS-local only) instead of 0.0.0.0
 	// Bot protection — opt-in per tunnel, HTTP subdomain tunnels only.
 	BotProtectionEnabled bool   `json:"bot_protection_enabled"`
 	BotProtectionTTL     int    `json:"bot_protection_ttl"`      // session TTL in seconds; 0 = default (86400)
 	BotProtectionAllowIP string `json:"bot_protection_allow_ip"` // JSON array of CIDR/IP strings
 	// TLSSkipVerify disables upstream TLS certificate verification in Caddy.
 	// Use for backends with self-signed certs (e.g. Proxmox, some NAS devices).
-	TLSSkipVerify bool `json:"tls_skip_verify"`
-	Status       string    `json:"status"`
-	Managed      bool      `json:"managed,omitempty" gorm:"-"`
-	Kind         string    `json:"kind,omitempty" gorm:"-"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	TLSSkipVerify bool      `json:"tls_skip_verify"`
+	Status        string    `json:"status"`
+	Managed       bool      `json:"managed,omitempty" gorm:"-"`
+	Kind          string    `json:"kind,omitempty" gorm:"-"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type BootstrapToken struct {
@@ -142,29 +144,29 @@ type BootstrapToken struct {
 // (agent token, port, rathole token) baked in — so secrets stay out of shell
 // history and access logs.
 type MigrationToken struct {
-	Token     string    `gorm:"primaryKey"`
-	MachineID string    `gorm:"index"`
+	Token     string `gorm:"primaryKey"`
+	MachineID string `gorm:"index"`
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }
 
 type AppSettings struct {
-	ID             string    `json:"id" gorm:"primaryKey"`
-	PasswordHash   string    `json:"-"`
-	IsSetup        bool      `json:"is_setup"`
-	Domain         string    `json:"domain"`
+	ID           string `json:"id" gorm:"primaryKey"`
+	PasswordHash string `json:"-"`
+	IsSetup      bool   `json:"is_setup"`
+	Domain       string `json:"domain"`
 	// ServerHost is the hostname or IP used as the rathole remote_addr in client
 	// configs. When Caddy is enabled this equals Domain. When Caddy is skipped it
 	// holds the manually-provided VPS hostname/IP so client configs can still be
 	// generated even though Domain is empty.
-	ServerHost     string    `json:"server_host"`
-	LocalSetupDone bool      `json:"local_setup_done"`
+	ServerHost     string `json:"server_host"`
+	LocalSetupDone bool   `json:"local_setup_done"`
 	// FirewallMode is one of "gopher" (Gopher manages iptables), "manual" (user manages),
 	// or "none" (no firewall). Empty string means the wizard step has not run yet.
-	FirewallMode      string    `json:"firewall_mode"`
+	FirewallMode string `json:"firewall_mode"`
 	// DashboardPrivate restricts the dashboard port to localhost (VPS-only) when true.
 	// Zero value (false) keeps it publicly reachable — safe migration default.
-	DashboardPrivate  bool      `json:"dashboard_private"`
+	DashboardPrivate bool `json:"dashboard_private"`
 	// BindIP restricts the IP that public-facing rathole ports and Caddy listen
 	// on. The dashboard's own HTTP listener is treated specially: when BindIP
 	// is non-empty, the dashboard binds to 127.0.0.1 only and Caddy proxies
@@ -172,15 +174,15 @@ type AppSettings struct {
 	// set BindIP also use Caddy for TLS termination and don't want the
 	// dashboard reachable on the public IP directly. Empty means 0.0.0.0
 	// (all interfaces) for everything.
-	BindIP            string    `json:"bind_ip" gorm:"default:''"`
+	BindIP string `json:"bind_ip" gorm:"default:''"`
 	// CustomIPTables holds raw iptables rule specs (one per line, everything after
 	// "iptables ") that are applied to the GOPHER_CUSTOM chain. Flushed and
 	// re-applied whenever this field changes.
-	CustomIPTables  string    `json:"custom_iptables"`
+	CustomIPTables string `json:"custom_iptables"`
 	// TOTP 2FA fields
-	TOTPSecret      string    `json:"-"`            // base32-encoded TOTP secret; empty means not enrolled
-	TOTPEnabled     bool      `json:"totp_enabled"` // true once confirmed via first successful code
-	TOTPBackupCodes string    `json:"-"`            // JSON array of bcrypt-hashed one-time codes
+	TOTPSecret      string `json:"-"`            // base32-encoded TOTP secret; empty means not enrolled
+	TOTPEnabled     bool   `json:"totp_enabled"` // true once confirmed via first successful code
+	TOTPBackupCodes string `json:"-"`            // JSON array of bcrypt-hashed one-time codes
 	// Fail2ban configuration (written to /etc/fail2ban/jail.d/gopher.conf on save)
 	Fail2banSetupDone bool   `json:"fail2ban_setup_done"` // true once fail2ban has been installed and configured
 	Fail2banMaxRetry  int    `json:"fail2ban_max_retry"`  // default 5
@@ -204,10 +206,10 @@ type AppSettings struct {
 	// the noise pubkey or they silently break the moment the server flips to
 	// noise. Empty when nothing was detected. Set once during migration;
 	// cleared only when the operator dismisses the dashboard banner.
-	RatholeCustomServicesWarning          string `json:"-"`
-	RatholeCustomServicesWarningDismissed bool   `json:"-"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	RatholeCustomServicesWarning          string    `json:"-"`
+	RatholeCustomServicesWarningDismissed bool      `json:"-"`
+	CreatedAt                             time.Time `json:"created_at"`
+	UpdatedAt                             time.Time `json:"updated_at"`
 }
 
 // FirewallRule is a user-defined rule applied to GOPHER_CUSTOM.
@@ -215,12 +217,12 @@ type AppSettings struct {
 type FirewallRule struct {
 	ID          string    `json:"id" gorm:"primaryKey"`
 	Description string    `json:"description"`
-	Raw         bool      `json:"raw"`         // if true, RawSpec is used as-is
-	RawSpec     string    `json:"raw_spec"`    // e.g. "-s 1.2.3.4 -p tcp --dport 80 -j ACCEPT"
-	Protocol    string    `json:"protocol"`    // "tcp", "udp", "all", "icmp"
-	PortRange   string    `json:"port_range"`  // "80", "8000:9000", "" = any
-	Source      string    `json:"source"`      // CIDR, e.g. "0.0.0.0/0"
-	Action      string    `json:"action"`      // "ACCEPT", "DROP", "REJECT"
+	Raw         bool      `json:"raw"`        // if true, RawSpec is used as-is
+	RawSpec     string    `json:"raw_spec"`   // e.g. "-s 1.2.3.4 -p tcp --dport 80 -j ACCEPT"
+	Protocol    string    `json:"protocol"`   // "tcp", "udp", "all", "icmp"
+	PortRange   string    `json:"port_range"` // "80", "8000:9000", "" = any
+	Source      string    `json:"source"`     // CIDR, e.g. "0.0.0.0/0"
+	Action      string    `json:"action"`     // "ACCEPT", "DROP", "REJECT"
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -244,6 +246,18 @@ type SSHKey struct {
 	IsDefault  bool      `json:"is_default"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+
+	// HasPrivateKey tells the frontend whether the private half is still stored
+	// server-side (it never sees the key itself — that's json:"-"). Set by the
+	// AfterFind hook. When false, the key is public-only: usable for
+	// authorized_keys / the jumpbox, but the server can no longer SSH with it.
+	HasPrivateKey bool `json:"has_private_key" gorm:"-"`
+}
+
+// AfterFind populates the computed HasPrivateKey on every read.
+func (k *SSHKey) AfterFind(*gorm.DB) error {
+	k.HasPrivateKey = k.PrivateKey != ""
+	return nil
 }
 
 // Event is the unified record for everything worth surfacing on the dashboard

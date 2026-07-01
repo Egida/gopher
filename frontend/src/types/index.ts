@@ -121,6 +121,8 @@ export interface SSHKey {
   public_key: string
   is_default: boolean
   machine_count?: number
+  /** false = private half was deleted from the server; public-only key */
+  has_private_key?: boolean
   created_at: string
   updated_at: string
 }

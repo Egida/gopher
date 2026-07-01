@@ -259,7 +259,26 @@ func (s *LocalSetupService) DownloadSSHKey(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if key.PrivateKey == "" {
+		return "", fmt.Errorf("private key was deleted from the server; only the public key remains")
+	}
 	return key.PrivateKey, nil
+}
+
+// DeletePrivateKey clears the stored private half of a key while keeping the
+// public key and the row. The public key stays usable for authorized_keys and
+// the jumpbox; the server simply no longer holds a secret that could SSH into
+// origins. Irreversible — callers should have downloaded it first if they want
+// to keep it. Server→origin control still works because it runs over the agent.
+func (s *LocalSetupService) DeletePrivateKey(id string) error {
+	key, err := db.GetSSHKey(id)
+	if err != nil {
+		return err
+	}
+	if key.PrivateKey == "" {
+		return nil // already public-only
+	}
+	return db.BlankSSHPrivateKey(id)
 }
 
 // jumpboxUsername is the dedicated, privilege-free system user whose

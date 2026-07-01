@@ -199,11 +199,21 @@ func (s *DeployService) DeployClient(machine *db.Machine) error {
 		}
 	}
 
+	// Full redeploy is an SSH-only operation. When the machine is public-only
+	// (private key deleted), there's no SSH transport — the agent keeps config in
+	// sync via push, so a full redeploy isn't needed; surface it clearly.
+	if sshKey != nil && sshKey.PrivateKey == "" && machine.PrivateKey == "" {
+		msg := "machine is public-only (SSH private key deleted) — redeploy runs over SSH and is unavailable; the agent keeps client config in sync automatically"
+		fmt.Fprintf(w, "ERROR: %s\n", msg)
+		s.Hub.Broadcast("\x00DONE")
+		return fmt.Errorf("%s", msg)
+	}
+
 	var client *sshpkg.SSHClient
-	if machine.TunnelPort > 0 && sshKey != nil {
+	if machine.TunnelPort > 0 && sshKey != nil && sshKey.PrivateKey != "" {
 		fmt.Fprintln(w, "Connecting to machine via tunnel...")
 		client, err = sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, sshKey.PrivateKey)
-	} else if machine.Host != "" {
+	} else if machine.Host != "" && machine.PrivateKey != "" {
 		fmt.Fprintln(w, "Connecting directly to machine...")
 		client, err = sshpkg.NewClient(machine.Host, machine.Port, machine.Username, machine.PrivateKey)
 	} else {
