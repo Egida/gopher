@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -186,24 +187,47 @@ func (s *DeployService) DeployClient(machine *db.Machine) error {
 		return err
 	}
 
-	var sshKey *db.SSHKey
-	if machine.TunnelPort > 0 {
-		var keyErr error
-		sshKey, keyErr = db.GetSSHKeyForMachine(machine)
-		if keyErr != nil {
-			// Surface the lookup failure rather than silently falling through
-			// to the legacy direct-host path. Without this, the caller sees a
-			// generic "no SSH access" / "SSH dial failed" error and has no
-			// signal that the actual cause is a missing or detached SSH key.
-			fmt.Fprintf(w, "WARN: SSH key lookup for machine %s failed: %v\n", machine.ID, keyErr)
+	ratholeHost := ratholeHostFromSettings(settings)
+	noisePub := settings.RatholeNoisePubKey
+
+	// Agent-first: on an agent machine, rathole is already installed — a
+	// "redeploy" is just a config re-sync. Read the current client.toml via the
+	// agent, merge the managed sections, push it back. No SSH, no private key.
+	if machine.AgentInstalled && machine.AgentRemotePort > 0 {
+		fmt.Fprintln(w, "Syncing rathole client config via agent...")
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ac := NewAgentClient(machine)
+		existing, gerr := ac.GetRatholeConfig(ctx)
+		if gerr == nil {
+			merged, merr := mergeClientManagedConfig(existing, machine, tunnels, ratholeHost, noisePub)
+			if merr != nil {
+				cancel()
+				fmt.Fprintf(w, "ERROR: Failed to generate client config: %v\n", merr)
+				s.Hub.Broadcast("\x00DONE")
+				return merr
+			}
+			perr := ac.PutRatholeConfig(ctx, merged)
+			cancel()
+			if perr == nil {
+				fmt.Fprintln(w, "✓ Client config synced via agent (rathole reloads in place)")
+				_ = db.SetMachineConfigPushPending(machine.ID, false)
+				s.Hub.Broadcast("\x00DONE")
+				return nil
+			}
+			fmt.Fprintf(w, "WARN: agent config push failed (%v) — trying SSH\n", perr)
+		} else {
+			cancel()
+			fmt.Fprintf(w, "WARN: agent unreachable (%v) — trying SSH\n", gerr)
 		}
 	}
 
-	// Full redeploy is an SSH-only operation. When the machine is public-only
-	// (private key deleted), there's no SSH transport — the agent keeps config in
-	// sync via push, so a full redeploy isn't needed; surface it clearly.
-	if sshKey != nil && sshKey.PrivateKey == "" && machine.PrivateKey == "" {
-		msg := "machine is public-only (SSH private key deleted) — redeploy runs over SSH and is unavailable; the agent keeps client config in sync automatically"
+	// SSH fallback — legacy / agent-down machines, needs a stored private key.
+	var sshKey *db.SSHKey
+	if machine.TunnelPort > 0 {
+		sshKey, _ = db.GetSSHKeyForMachine(machine)
+	}
+	if (sshKey == nil || sshKey.PrivateKey == "") && machine.PrivateKey == "" {
+		msg := "no agent and no stored SSH private key (public-only machine) — nothing to redeploy over; the agent keeps config in sync automatically once reachable"
 		fmt.Fprintf(w, "ERROR: %s\n", msg)
 		s.Hub.Broadcast("\x00DONE")
 		return fmt.Errorf("%s", msg)
@@ -227,7 +251,7 @@ func (s *DeployService) DeployClient(machine *db.Machine) error {
 	defer client.Close()
 
 	existingConfig, _ := client.Execute("cat " + paths.RatholeClientConfig + " 2>/dev/null || cat " + paths.LegacyRatholeClientConfig + " 2>/dev/null || cat ~/.config/rathole/client.toml 2>/dev/null")
-	clientConfig, err := mergeClientManagedConfig(existingConfig, machine, tunnels, ratholeHostFromSettings(settings), settings.RatholeNoisePubKey)
+	clientConfig, err := mergeClientManagedConfig(existingConfig, machine, tunnels, ratholeHost, noisePub)
 	if err != nil {
 		fmt.Fprintf(w, "ERROR: Failed to generate client config: %v\n", err)
 		s.Hub.Broadcast("\x00DONE")

@@ -165,8 +165,8 @@ func (s *BootstrapService) Register(req BootstrapRequest, serverHost string) (*B
 	}
 	ratholeConfig := config.GenerateMachineSSHClientConfig(ratholeHost, machine, noisePub)
 
-	// Async: wait for tunnel then verify SSH connectivity.
-	go goSafe("awaitSSHHealth", func() { s.awaitSSHHealth(machine, sshKey.PrivateKey) })
+	// Async: wait for the tunnel to come up (TCP probe, no SSH).
+	go goSafe("awaitTunnelHealth", func() { s.awaitTunnelHealth(machine) })
 	// Async: poll the agent's back-channel until it answers, so the bootstrap
 	// modal can flip "machine registered" → "agent ready" within seconds of
 	// the agent service starting on the client (vs. waiting up to a minute
@@ -268,35 +268,38 @@ func isUniqueConstraintErr(err error) bool {
 	return strings.Contains(msg, "UNIQUE constraint failed") || strings.Contains(msg, "constraint failed: unique")
 }
 
-const bootstrapSSHHealthTimeout = 4 * time.Minute
+const bootstrapTunnelHealthTimeout = 4 * time.Minute
 
-// awaitSSHHealth polls localhost:tunnelPort for initial bootstrap SSH readiness.
-// Some machines take longer than a minute on first bootstraps (package installs,
-// systemd startup), so timeout keeps status as "pending" instead of hard-failing.
+// awaitTunnelHealth polls the machine's rathole tunnel port for initial
+// connectivity — a plain TCP connect, no SSH. A successful dial means the
+// rathole-client connected out and the VPS-side port is forwarding, which is
+// exactly the "machine is reachable" signal we want, without the server needing
+// an SSH private key. Some machines take longer than a minute on first
+// bootstraps (package installs, systemd startup), so on timeout we leave the
+// status "pending" rather than hard-failing.
 //
 // Uses SetMachineStatus (column-level UPDATE) rather than UpdateMachine
 // (DB.Save full-row replace) to avoid clobbering AgentInstalled. This
 // goroutine runs concurrently with awaitAgentReady — both hold the same
 // in-memory *db.Machine struct that Register handed them, with its stale
 // AgentInstalled=false. Saving that struct after awaitAgentReady has already
-// flipped agent_installed=true in the DB would race-revert the flag, making
-// the dashboard's agent badge oscillate "Install Agent" → "v0.x" → "Install
-// Agent" until the next health-poll cycle re-promoted it.
-func (s *BootstrapService) awaitSSHHealth(machine *db.Machine, privateKey string) {
-	deadline := time.Now().Add(bootstrapSSHHealthTimeout)
+// flipped agent_installed=true in the DB would race-revert the flag.
+func (s *BootstrapService) awaitTunnelHealth(machine *db.Machine) {
+	deadline := time.Now().Add(bootstrapTunnelHealthTimeout)
+	addr := net.JoinHostPort(TunnelDialHost(machine), fmt.Sprintf("%d", machine.TunnelPort))
 	for time.Now().Before(deadline) {
 		time.Sleep(5 * time.Second)
-		c, err := sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, privateKey)
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 		if err != nil {
 			continue
 		}
-		c.Close()
+		_ = conn.Close()
 		now := time.Now()
 		_ = db.SetMachineStatus(machine.ID, "connected", &now)
 		return
 	}
-	// Keep machine in pending state; monitor loop can flip to connected once it
-	// observes successful SSH after slower bootstrap completions.
+	// Keep machine in pending state; the monitor/health loop flips to connected
+	// once it observes reachability after slower bootstrap completions.
 	_ = db.SetMachineStatus(machine.ID, "pending", nil)
 }
 
