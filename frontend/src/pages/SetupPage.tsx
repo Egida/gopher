@@ -7,6 +7,7 @@ import client from '../api/client'
 import { useAuth } from '../lib/auth'
 import { localApi, type LocalServiceStatus, type FirewallStatus, type FirewallMode, type DNSCheckResult, type DNSCheck } from '../api/local'
 import { toast } from '../lib/toast'
+import { stripKeyComment } from '../lib/sshkey'
 import DeployLogModal from '../components/DeployLogModal'
 import DownloadKeyButton from '../components/DownloadKeyButton'
 import type { SSHKey } from '../types'
@@ -816,9 +817,9 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
         <div>
           <div className="text-xs font-medium text-gray-500 mb-1">Public key</div>
           <div className="bg-gray-50 rounded-lg p-3 flex items-center gap-2">
-            <code className="text-xs text-gray-700 break-all flex-1">{generatedKey?.public_key}</code>
+            <code className="text-xs text-gray-700 break-all flex-1">{stripKeyComment(generatedKey?.public_key ?? '')}</code>
             <button
-              onClick={() => { navigator.clipboard.writeText(generatedKey?.public_key ?? ''); toast.success('Copied!') }}
+              onClick={() => { navigator.clipboard.writeText(stripKeyComment(generatedKey?.public_key ?? '')); toast.success('Copied!') }}
               className="shrink-0 text-gray-400 hover:text-gray-600"
             >
               <ClipboardCopy size={14} />

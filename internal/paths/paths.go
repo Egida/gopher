@@ -37,6 +37,14 @@ const (
 	RatholeBin = BinDir + "/rathole"
 )
 
+// ManagedKeyMarker is the authorized_keys comment Gopher tags its single
+// managed key with, so it can find and replace exactly its own key on an origin
+// and never touch an operator-owned key. Shared here so the server (SSH
+// fallback) and the agent (SetManagedKey RPC) can't drift. The bootstrap.sh and
+// gopher-uninstall.sh templates hardcode the same string — they can't import
+// Go — so keep those in sync by hand if this ever changes.
+const ManagedKeyMarker = "gopher-managed"
+
 // Generated config files and dirs.
 const (
 	CaddyfilePath = ConfigDir + "/caddy/Caddyfile"

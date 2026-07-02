@@ -149,7 +149,7 @@ fi
 AK="$REAL_HOME/.ssh/authorized_keys"
 if [ -f "$AK" ]; then
   _tmp=$(mktemp)
-  grep -v ' gopher-managed$' "$AK" > "$_tmp" 2>/dev/null || true
+  grep -v ' gopher-managed[[:space:]]*$' "$AK" > "$_tmp" 2>/dev/null || true
   if [ -f "$VPS_KEY_FILE" ]; then
     KEY_BLOB=$(awk '{print $2}' "$VPS_KEY_FILE" 2>/dev/null)
     if [ -n "$KEY_BLOB" ]; then

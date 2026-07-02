@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	agentpb "github.com/smalex-z/gopher/internal/agentpb"
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 // runCommand runs a command and returns combined output. Hoisted so the system
@@ -237,10 +238,6 @@ func (s *agentServer) GetNetworkInfo(ctx context.Context, _ *agentpb.GetNetworkI
 	}, nil
 }
 
-// managedKeyMarker is the authorized_keys comment gopher tags its single managed
-// key with, so it can find + replace exactly its own key and never an operator's.
-const managedKeyMarker = "gopher-managed"
-
 // SetManagedKey makes public_key the ONE gopher-managed key in the user's
 // authorized_keys: it drops every prior gopher-managed line (comment == marker)
 // and writes this one, normalized to "type blob gopher-managed". Operator keys
@@ -267,11 +264,11 @@ chmod 700 "$home/.ssh"; chmod 600 "$home/.ssh/authorized_keys"
 ak="$home/.ssh/authorized_keys"
 line=$(printf '%s\n' "$pk" | awk -v m="$marker" 'NF>=2 {print $1, $2, m; exit}')
 [ -n "$line" ] || { echo "invalid public key" >&2; exit 3; }
-grep -v " $marker\$" "$ak" > "$ak.tmp" 2>/dev/null || true
+grep -v " $marker[[:space:]]*\$" "$ak" > "$ak.tmp" 2>/dev/null || true
 printf '%s\n' "$line" >> "$ak.tmp"
 mv "$ak.tmp" "$ak"
 chown -R "$u:$u" "$home/.ssh"`
-	out, err := exec.CommandContext(ctx, "sudo", "-n", "sh", "-c", script, "_", user, pubkey, managedKeyMarker).CombinedOutput() // #nosec G204 — args are fixed positions
+	out, err := exec.CommandContext(ctx, "sudo", "-n", "sh", "-c", script, "_", user, pubkey, paths.ManagedKeyMarker).CombinedOutput() // #nosec G204 — args are fixed positions
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "set managed key for %s: %v: %s", user, err, strings.TrimSpace(string(out)))
 	}

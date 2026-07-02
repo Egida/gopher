@@ -64,9 +64,10 @@ type HealthService struct {
 	// pre-existing behaviour.
 	configPusher ConfigPusher
 
-	// agentUpgrader rolls an outdated/protocol-skewed agent forward by running
-	// the install over the server's SSH connection (no operator paste). Set by
-	// the cmd/server wiring; nil disables auto-upgrade (e.g. in tests).
+	// agentUpgrader rolls an outdated/protocol-skewed agent forward via the
+	// agent's own /self-update endpoint over the rathole back-channel (no SSH, no
+	// operator paste). Set by the cmd/server wiring; nil disables auto-upgrade
+	// (e.g. in tests).
 	agentUpgrader AgentUpgrader
 	// agentUpgrades tracks per-machine auto-upgrade attempts (last trigger time +
 	// consecutive-attempt count) so the retry interval can back off and a durably
@@ -170,7 +171,8 @@ func (s *HealthService) SetAgentUpgrader(u AgentUpgrader) {
 	s.agentUpgrader = u
 }
 
-// maybeAutoUpgradeAgent triggers an SSH-driven agent upgrade for m, throttled
+// maybeAutoUpgradeAgent triggers an agent self-update for m (over the rathole
+// back-channel, no SSH), throttled
 // per machine. Runs in the background so it never blocks a health tick; the
 // upgraded agent is picked up on a subsequent poll.
 func (s *HealthService) maybeAutoUpgradeAgent(m *db.Machine, reason string) {

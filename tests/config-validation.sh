@@ -49,15 +49,17 @@ echo "$RESP" | jq -e '.success == true' >/dev/null \
     || fail "Auth setup failed — response: $RESP"
 pass "Auth configured"
 
-# ── Set Domain via local/skip ─────────────────────────────────────────────────
+# ── Set Domain directly ───────────────────────────────────────────────────────
+# The POST /api/local/skip endpoint was removed with the setup-wizard skip flow;
+# the domain is now set only during the full install, which can't run in CI.
+# Write it straight to the settings row (created by the auth-setup step above) —
+# the server reads AppSettings fresh from the DB on every config operation, so a
+# direct update is picked up. busy_timeout waits out the running server's writer.
 echo ""
-echo "3. Configuring domain via local/skip..."
-RESP=$(curl -sf -b "$COOKIE_JAR" \
-    -X POST "http://localhost:$GOPHER_PORT/api/local/skip" \
-    -H "Content-Type: application/json" \
-    -d '{"domain":"example.com"}')
-echo "$RESP" | jq -e '.success == true' >/dev/null \
-    || fail "local/skip failed — response: $RESP"
+echo "3. Configuring domain (example.com)..."
+sqlite3 "$GOPHER_DB" "PRAGMA busy_timeout=5000; UPDATE app_settings SET domain='example.com' WHERE id='singleton';"
+DOMAIN_SET=$(sqlite3 "$GOPHER_DB" "SELECT domain FROM app_settings WHERE id='singleton';")
+[[ "$DOMAIN_SET" == "example.com" ]] || fail "Domain set failed — got: '$DOMAIN_SET'"
 pass "Domain set to example.com"
 
 # ── Create Machine + Tunnel ───────────────────────────────────────────────────

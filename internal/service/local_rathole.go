@@ -237,9 +237,14 @@ func (s *LocalSetupService) updateClientToml(machine *db.Machine, transform func
 
 	// SSH fallback only when a usable private key is stored. When the operator
 	// has deleted the private key (public-only), there's no SSH transport — the
-	// agent is the sole path. Return so the caller flags ConfigPushPending and
-	// the health loop retries via the agent on reconnect.
+	// agent is the sole path. Flag ConfigPushPending here (not the caller — no
+	// caller does) so HealthService.maybeRetryConfigPush re-pushes via the agent
+	// once it reconnects; otherwise a transient agent outage during a tunnel
+	// change would leave the origin's client.toml stale forever.
 	if !machineHasSSHPrivateKey(machine) {
+		if err := db.SetMachineConfigPushPending(machine.ID, true); err != nil {
+			log.Printf("mark config_push_pending for %s (%s): %v", machine.ID, machine.Name, err)
+		}
 		if pushErr == nil {
 			pushErr = fmt.Errorf("no agent and no stored SSH private key for %s — config push deferred", machine.Name)
 		}

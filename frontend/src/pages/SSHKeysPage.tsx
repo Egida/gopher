@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Key, KeyRound, Download, Trash2, Star, Upload, RefreshCw, Copy, Check, Plus } from 'lucide-react'
 import { localApi } from '../api/local'
 import { toast } from '../lib/toast'
+import { stripKeyComment } from '../lib/sshkey'
 import type { SSHKey } from '../types'
 import DownloadKeyButton from '../components/DownloadKeyButton'
 import DeletePrivateKeyButton from '../components/DeletePrivateKeyButton'
@@ -51,7 +52,7 @@ function AddKeyModal({ onClose }: AddKeyModalProps) {
   })
 
   const copyPublicKey = (key: string) => {
-    navigator.clipboard.writeText(key)
+    navigator.clipboard.writeText(stripKeyComment(key))
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
     toast.success('Copied!')
@@ -78,7 +79,7 @@ function AddKeyModal({ onClose }: AddKeyModalProps) {
           <div>
             <div className="text-xs font-medium text-gray-500 mb-1">Public key</div>
             <div className="bg-gray-50 rounded-lg p-3 flex items-start gap-2">
-              <code className="text-xs text-gray-700 break-all flex-1">{generatedKey.public_key}</code>
+              <code className="text-xs text-gray-700 break-all flex-1">{stripKeyComment(generatedKey.public_key)}</code>
               <button
                 onClick={() => copyPublicKey(generatedKey.public_key)}
                 className="shrink-0 text-gray-400 hover:text-gray-600 mt-0.5"
@@ -236,7 +237,7 @@ function AddKeyModal({ onClose }: AddKeyModalProps) {
 function CopyPublicKeyButton({ publicKey }: { publicKey: string }) {
   const [copied, setCopied] = useState(false)
   const copy = () => {
-    navigator.clipboard.writeText(publicKey).then(() => {
+    navigator.clipboard.writeText(stripKeyComment(publicKey)).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
       toast.success('Public key copied')
@@ -381,7 +382,7 @@ export default function SSHKeysPage() {
                     <CopyPublicKeyButton publicKey={key.public_key} />
                   </div>
                   <code className="block bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-600 font-mono break-all">
-                    {key.public_key.trim()}
+                    {stripKeyComment(key.public_key)}
                   </code>
                 </div>
 

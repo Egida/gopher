@@ -9,6 +9,7 @@ import (
 
 	"github.com/smalex-z/gopher/internal/api/dto"
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/paths"
 	sshpkg "github.com/smalex-z/gopher/internal/ssh"
 )
 
@@ -430,23 +431,31 @@ func (s *MachineService) ReassignSSHKey(machineID, newKeyID string) error {
 	return db.UpdateMachine(machine)
 }
 
-// managedKeyMarker tags gopher's single managed authorized_keys entry so it can
-// be found + replaced without touching operator-owned keys. Kept in sync with
-// cmd/agent's managedKeyMarker and bootstrap.sh's marker.
-const managedKeyMarker = "gopher-managed"
+// shSingleQuote wraps s in single quotes for safe interpolation into a POSIX
+// shell command. Inside single quotes every character is literal, so shell
+// expansion — $(...), backticks, $VAR — cannot fire, which is what stops a
+// crafted authorized_keys comment from executing on the origin. Embedded single
+// quotes are handled by the standard close-escape-reopen idiom.
+// (The agent's SetManagedKey passes args positionally to exec and doesn't need
+// this; the SSH fallback sends one command string, so it must quote.)
+func shSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
 
 // setManagedKeyShell builds a shell snippet that makes pubKey the single
 // gopher-managed key in ~/.ssh/authorized_keys: it strips every prior managed
-// line (comment == marker) and writes this key tagged with the marker,
-// atomically. Same logic as the agent's SetManagedKey, for the SSH fallback.
+// line (marker comment, tolerating trailing CR/whitespace) and writes this key
+// tagged with the marker, atomically. Same end state as the agent's
+// SetManagedKey, for the SSH fallback. The key is single-quoted (never %q, which
+// is Go quoting, not shell quoting — it leaves $() and backticks live).
 func setManagedKeyShell(pubKey string) string {
-	// %q quotes for the shell the same way the rest of this file does; the awk
-	// program normalizes the key to "type blob <marker>".
+	m := paths.ManagedKeyMarker
 	return fmt.Sprintf(
 		`ak=~/.ssh/authorized_keys; mkdir -p ~/.ssh; touch "$ak"; chmod 700 ~/.ssh; chmod 600 "$ak"; `+
-			`line=$(printf '%%s\n' %q | awk '{print $1, $2, %q; exit}'); `+
-			`grep -v " %s$" "$ak" > "$ak.tmp" 2>/dev/null || true; `+
+			`line=$(printf '%%s\n' %s | awk 'NF>=2 {print $1, $2, "%s"; exit}'); `+
+			`[ -n "$line" ] || exit 3; `+
+			`grep -v " %s[[:space:]]*$" "$ak" > "$ak.tmp" 2>/dev/null || true; `+
 			`printf '%%s\n' "$line" >> "$ak.tmp"; mv "$ak.tmp" "$ak"`,
-		pubKey, managedKeyMarker, managedKeyMarker,
+		shSingleQuote(pubKey), m, m,
 	)
 }

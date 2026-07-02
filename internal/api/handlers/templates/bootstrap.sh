@@ -156,7 +156,7 @@ chmod 700 ~/.ssh
 touch ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 MANAGED_LINE=$(printf '%s\n' "$VPS_PUBLIC_KEY" | awk 'NF>=2 {print $1, $2, "gopher-managed"; exit}')
-grep -v ' gopher-managed$' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp 2>/dev/null || true
+grep -v ' gopher-managed[[:space:]]*$' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp 2>/dev/null || true
 printf '%s\n' "$MANAGED_LINE" >> ~/.ssh/authorized_keys.tmp
 mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
