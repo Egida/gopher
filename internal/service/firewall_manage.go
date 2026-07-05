@@ -214,12 +214,20 @@ func firewallDisableConflicting(status *FirewallStatus, logWriter io.Writer, sud
 }
 
 func firewallInitRules(logWriter io.Writer, sudo []string) error {
+	// Ordering is anti-lockout — identical rationale to firewallInitRules6:
+	// FirewallConfigure("gopher") is a re-runnable endpoint, so on a second run
+	// INPUT is already DROP from the prior takeover. Resetting INPUT to ACCEPT
+	// BEFORE the flush means the flush never strips the SSH/established allows
+	// while DROP is in force, and adding every allow BEFORE the default-deny
+	// policy means a partial failure mid-sequence leaves INPUT in ACCEPT (its
+	// pre-takeover, still-reachable state) rather than a locked DROP-with-no-SSH.
+	// NOTE: only port 22 is hard-allowed; a non-standard sshd port would be
+	// reachable only via conntrack until reboot. Deployments here run on 22.
 	// All arguments below are hardcoded constants — no user input. #nosec G204
 	steps := [][]string{
+		append(sudo, "iptables", "-P", "INPUT", "ACCEPT"),                   // open BEFORE flush (anti-lockout)
 		append(sudo, "iptables", "-F"),                                      // flush rules
 		append(sudo, "iptables", "-X"),                                      // delete user chains
-		append(sudo, "iptables", "-P", "INPUT", "DROP"),                     // default deny incoming
-		append(sudo, "iptables", "-P", "FORWARD", "DROP"),                   // default deny forwarding
 		append(sudo, "iptables", "-P", "OUTPUT", "ACCEPT"),                  // allow outgoing
 		append(sudo, "iptables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT"), // loopback
 		append(sudo, "iptables", "-A", "INPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"), // established
@@ -227,6 +235,9 @@ func firewallInitRules(logWriter io.Writer, sudo []string) error {
 		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"),                          // HTTP
 		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "443", "-j", "ACCEPT"),                         // HTTPS
 		append(sudo, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", "2333", "-j", "ACCEPT"),                        // rathole control
+		// Default-deny policy LAST — only after every allow above is in place.
+		append(sudo, "iptables", "-P", "INPUT", "DROP"),   // default deny incoming
+		append(sudo, "iptables", "-P", "FORWARD", "DROP"), // default deny forwarding
 		// Dashboard port (Gopher) is handled via GOPHER_TUNNELS by ApplyDashboardPort, not hardcoded here.
 	}
 	for _, args := range steps {

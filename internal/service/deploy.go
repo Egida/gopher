@@ -69,10 +69,14 @@ func (h *LogHub) Subscribe() chan string {
 }
 
 func (h *LogHub) Unsubscribe(ch chan string) {
+	// Close under the write lock (not after releasing it). broadcastSentinel
+	// sends under the read lock, so closing here — mutually exclusive with any
+	// in-flight send — is what prevents the send-on-closed-channel panic that
+	// would otherwise crash the whole daemon.
 	h.mu.Lock()
 	delete(h.subscribers, ch)
-	h.mu.Unlock()
 	close(ch)
+	h.mu.Unlock()
 }
 
 // Broadcast delivers msg to every current subscriber. Regular log lines use
@@ -103,15 +107,17 @@ func (h *LogHub) Broadcast(msg string) {
 // eventually be torn down by Unsubscribe when the handler returns, so the
 // damage is bounded to "this one slow client never sees DONE."
 func (h *LogHub) broadcastSentinel(msg string) {
+	// Hold the read lock across the whole dispatch — including wg.Wait(). Because
+	// Unsubscribe closes channels under the write lock, keeping RLock until every
+	// per-subscriber send has completed or timed out guarantees no goroutine ever
+	// sends on a channel being closed (which would panic and crash the daemon).
+	// Other broadcasts still proceed concurrently (they also hold only RLock);
+	// only Unsubscribe blocks, and only until the bounded sentinel timeout.
 	h.mu.RLock()
-	subs := make([]chan string, 0, len(h.subscribers))
-	for ch := range h.subscribers {
-		subs = append(subs, ch)
-	}
-	h.mu.RUnlock()
+	defer h.mu.RUnlock()
 
 	var wg sync.WaitGroup
-	for _, ch := range subs {
+	for ch := range h.subscribers {
 		wg.Add(1)
 		go func(c chan string) {
 			defer wg.Done()
@@ -221,28 +227,21 @@ func (s *DeployService) DeployClient(machine *db.Machine) error {
 		}
 	}
 
-	// SSH fallback — legacy / agent-down machines, needs a stored private key.
+	// SSH fallback — agent-down machines, needs a stored private key over the
+	// tunnel. No key → don't attempt SSH; the agent is the only transport.
 	var sshKey *db.SSHKey
 	if machine.TunnelPort > 0 {
 		sshKey, _ = db.GetSSHKeyForMachine(machine)
 	}
-	if (sshKey == nil || sshKey.PrivateKey == "") && machine.PrivateKey == "" {
+	if sshKey == nil || sshKey.PrivateKey == "" {
 		msg := "no agent and no stored SSH private key (public-only machine) — nothing to redeploy over; the agent keeps config in sync automatically once reachable"
 		fmt.Fprintf(w, "ERROR: %s\n", msg)
 		s.Hub.Broadcast("\x00DONE")
 		return fmt.Errorf("%s", msg)
 	}
 
-	var client *sshpkg.SSHClient
-	if machine.TunnelPort > 0 && sshKey != nil && sshKey.PrivateKey != "" {
-		fmt.Fprintln(w, "Connecting to machine via tunnel...")
-		client, err = sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, sshKey.PrivateKey)
-	} else if machine.Host != "" && machine.PrivateKey != "" {
-		fmt.Fprintln(w, "Connecting directly to machine...")
-		client, err = sshpkg.NewClient(machine.Host, machine.Port, machine.Username, machine.PrivateKey)
-	} else {
-		err = fmt.Errorf("no SSH access: machine has no host and tunnel is not established")
-	}
+	fmt.Fprintln(w, "Connecting to machine via tunnel...")
+	client, err := sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, sshKey.PrivateKey)
 	if err != nil {
 		fmt.Fprintf(w, "ERROR: Failed to connect to machine: %v\n", err)
 		s.Hub.Broadcast("\x00DONE")

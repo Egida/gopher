@@ -972,8 +972,15 @@ func detectHostIPs() []string {
 // schedules a self-restart so the HTTP server rebinds (0.0.0.0 ↔ 127.0.0.1).
 func (s *LocalSetupService) SetBindIP(bindIP string) error {
 	if bindIP != "" {
-		if net.ParseIP(bindIP) == nil {
+		ip := net.ParseIP(bindIP)
+		if ip == nil {
 			return fmt.Errorf("invalid IP address: %q", bindIP)
+		}
+		// Reject IPv6: bind_addr is built as bare "host:port" (no brackets), so an
+		// IPv6 host produces malformed TOML that fails validation and wedges every
+		// rathole reconcile. Only IPv4 bind addresses are supported.
+		if ip.To4() == nil {
+			return fmt.Errorf("bind IP must be IPv4: %q is IPv6, which rathole bind_addr does not support here", bindIP)
 		}
 	}
 	if err := db.MutateSettings(func(s *db.AppSettings) error {

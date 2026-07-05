@@ -26,17 +26,19 @@ type BotSession struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// VPSConfig is the edge's public identity (host + domain), derived from
+// settings by GetVPS for GET /api/vps. It no longer carries any SSH
+// credentials: the old flow stored a VPS keypair here, but the server never
+// holds VPS-side private keys now.
 type VPSConfig struct {
-	ID            string    `json:"id" gorm:"primaryKey"`
-	Host          string    `json:"host"`
-	Port          int       `json:"port"`
-	Username      string    `json:"username"`
-	PrivateKey    string    `json:"private_key"`
-	Domain        string    `json:"domain"`
-	SSHPublicKey  string    `json:"ssh_public_key"`
-	SSHPrivateKey string    `json:"ssh_private_key,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID           string    `json:"id" gorm:"primaryKey"`
+	Host         string    `json:"host"`
+	Port         int       `json:"port"`
+	Username     string    `json:"username"`
+	Domain       string    `json:"domain"`
+	SSHPublicKey string    `json:"ssh_public_key"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type Machine struct {
@@ -45,7 +47,6 @@ type Machine struct {
 	Host            string     `json:"host"`
 	Port            int        `json:"port"`
 	Username        string     `json:"username"`
-	PrivateKey      string     `json:"private_key,omitempty"`
 	TunnelPort      int        `json:"tunnel_port"`
 	RatholeSSHToken string     `json:"rathole_ssh_token,omitempty"`
 	SSHKeyID        string     `json:"ssh_key_id" gorm:"index"`

@@ -45,6 +45,9 @@ type HealthService struct {
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	running  atomic.Bool
+	// wg tracks the long-lived loops (loop + janitorLoop) so Stop can wait for
+	// them to drain rather than returning while one is mid DB-write.
+	wg sync.WaitGroup
 
 	// Per-machine state for the auto-recovery throttle. We don't want to spam
 	// `systemctl restart rathole-client` if the machine is durably broken.
@@ -319,6 +322,7 @@ func (s *HealthService) Start() {
 	s.mu.Lock()
 	s.streamCtx, s.streamCancel = context.WithCancel(context.Background())
 	s.mu.Unlock()
+	s.wg.Add(2)
 	go s.loop()
 	go s.janitorLoop()
 }
@@ -332,9 +336,19 @@ func (s *HealthService) Stop() {
 		}
 		s.mu.Unlock()
 	})
+	// Wait (bounded) for loop + janitorLoop to drain so a SIGTERM doesn't kill a
+	// goroutine mid DB-write. Mirrors MonitorService.Stop.
+	done := make(chan struct{})
+	go func() { s.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		log.Printf("health: stop timeout — a goroutine may still be in-flight")
+	}
 }
 
 func (s *HealthService) loop() {
+	defer s.wg.Done()
 	// Run the first sweep immediately so the dashboard isn't blank for a minute
 	// after startup.
 	s.tick()
@@ -731,6 +745,7 @@ func (s *HealthService) maybeRecover(m *db.Machine, reason string) {
 
 // janitorLoop trims old health-check rows so the table doesn't grow forever.
 func (s *HealthService) janitorLoop() {
+	defer s.wg.Done()
 	t := time.NewTicker(s.purgeInterval)
 	defer t.Stop()
 	for {

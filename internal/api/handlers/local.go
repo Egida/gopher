@@ -101,6 +101,13 @@ func (h *LocalHandler) Install(w http.ResponseWriter, r *http.Request) {
 		response.BadRequest(w, "domain is required")
 		return
 	}
+	// Validate charset before it's persisted and flows into Caddy config text.
+	// Without this a domain with whitespace/braces/newlines could inject Caddy
+	// directives (the same validDomain regex already guards the DNS endpoints).
+	if len(body.Domain) > 253 || !validDomain.MatchString(body.Domain) {
+		response.BadRequest(w, "invalid domain")
+		return
+	}
 	if err := h.svc.Install(body.Domain); err != nil {
 		if errors.Is(err, service.ErrOpInProgress) {
 			response.Error(w, http.StatusConflict, err.Error())

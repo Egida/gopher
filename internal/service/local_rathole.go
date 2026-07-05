@@ -313,6 +313,12 @@ func (s *LocalSetupService) updateClientTomlViaSSH(machine *db.Machine, transfor
 	if sshKeyErr != nil {
 		return fmt.Errorf("no server SSH key available; machine may need to be re-bootstrapped")
 	}
+	// Don't even attempt SSH without a stored private key — dialing with an empty
+	// key can only fail, and the retry loop below would burn 30s doing it. The
+	// agent is the transport for public-only machines.
+	if sshKey.PrivateKey == "" {
+		return fmt.Errorf("no stored SSH private key (public-only) — config push runs via the agent")
+	}
 	var sshClient *sshpkg.SSHClient
 	var sshDialErr error
 	for attempt := 0; attempt < 6; attempt++ {

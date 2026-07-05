@@ -32,15 +32,14 @@ func (s *MachineService) Get(id string) (*db.Machine, error) {
 
 func (s *MachineService) Create(req dto.CreateMachineRequest) (*db.Machine, error) {
 	machine := &db.Machine{
-		ID:         shortToken(),
-		Name:       req.Name,
-		Host:       req.Host,
-		Port:       req.Port,
-		Username:   req.Username,
-		PrivateKey: req.PrivateKey,
-		Status:     "pending",
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:        shortToken(),
+		Name:      req.Name,
+		Host:      req.Host,
+		Port:      req.Port,
+		Username:  req.Username,
+		Status:    "pending",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	if machine.Port == 0 {
 		machine.Port = 22
@@ -62,9 +61,6 @@ func (s *MachineService) Update(id string, req dto.UpdateMachineRequest) (*db.Ma
 	machine.Host = req.Host
 	machine.Port = req.Port
 	machine.Username = req.Username
-	if req.PrivateKey != "" {
-		machine.PrivateKey = req.PrivateKey
-	}
 	machine.UpdatedAt = time.Now()
 
 	if err := db.UpdateMachine(machine); err != nil {
@@ -256,19 +252,16 @@ func (s *MachineService) Status(id string) (map[string]interface{}, error) {
 		}
 	}
 
-	var client *sshpkg.SSHClient
-	if machine.TunnelPort > 0 && machineHasSSHPrivateKey(machine) {
-		if sshKey, kerr := db.GetSSHKeyForMachine(machine); kerr == nil {
-			client, err = sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, sshKey.PrivateKey)
-		}
+	// SSH fallback: only when a tunnel and a stored private key both exist. No
+	// key → don't attempt SSH at all; the agent is the only supported path.
+	if machine.TunnelPort == 0 || !machineHasSSHPrivateKey(machine) {
+		return map[string]interface{}{"id": id, "connected": false, "error": "no agent and no stored SSH private key"}, nil
 	}
-	if client == nil {
-		if machine.Host != "" && machine.PrivateKey != "" {
-			client, err = sshpkg.NewClient(machine.Host, machine.Port, machine.Username, machine.PrivateKey)
-		} else {
-			return map[string]interface{}{"id": id, "connected": false, "error": "no agent and no stored SSH private key"}, nil
-		}
+	sshKey, kerr := db.GetSSHKeyForMachine(machine)
+	if kerr != nil {
+		return map[string]interface{}{"id": id, "connected": false, "error": "no agent and no usable SSH private key"}, nil
 	}
+	client, err := sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, sshKey.PrivateKey)
 	if err != nil {
 		return map[string]interface{}{
 			"id":        id,
@@ -312,39 +305,18 @@ func (s *MachineService) RefreshNetworkInfo(id string) (map[string]interface{}, 
 		}
 	}
 
-	// SSH fallback needs a stored private key; when public-only, surface that.
-	if machine.TunnelPort > 0 && !machineHasSSHPrivateKey(machine) && machine.PrivateKey == "" {
+	// SSH fallback needs a tunnel and a stored private key. Public-only or no
+	// tunnel → don't attempt SSH; the agent is the only discovery path.
+	if machine.TunnelPort == 0 || !machineHasSSHPrivateKey(machine) {
 		return map[string]interface{}{"id": id, "error": "network-info discovery unavailable: no agent support and no stored SSH private key (public-only machine)"}, nil
 	}
-
-	var client *sshpkg.SSHClient
-	var sshKeyErr error
-	if machine.TunnelPort > 0 {
-		key, kerr := db.GetSSHKeyForMachine(machine)
-		if kerr != nil {
-			sshKeyErr = kerr
-		} else {
-			client, _ = sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, key.PrivateKey)
-		}
+	key, kerr := db.GetSSHKeyForMachine(machine)
+	if kerr != nil {
+		return map[string]interface{}{"id": id, "error": fmt.Sprintf("ssh key lookup failed: %v", kerr)}, nil
 	}
-	if client == nil && machine.Host != "" {
-		p := machine.Port
-		if p == 0 {
-			p = 22
-		}
-		client, err = sshpkg.NewClient(machine.Host, p, machine.Username, machine.PrivateKey)
-		if err != nil {
-			return map[string]interface{}{"id": id, "error": err.Error()}, nil
-		}
-	}
-	if client == nil {
-		// Surface the SSH-key lookup failure when it was the actual reason
-		// the tunnel path didn't take. The previous "no ssh access method"
-		// message was misleading — the machine had a tunnel, just no key.
-		if sshKeyErr != nil {
-			return map[string]interface{}{"id": id, "error": fmt.Sprintf("ssh key lookup failed: %v", sshKeyErr)}, nil
-		}
-		return map[string]interface{}{"id": id, "error": "no ssh access method"}, nil
+	client, err := sshpkg.NewClient(TunnelDialHost(machine), machine.TunnelPort, machine.Username, key.PrivateKey)
+	if err != nil {
+		return map[string]interface{}{"id": id, "error": err.Error()}, nil
 	}
 	defer client.Close()
 

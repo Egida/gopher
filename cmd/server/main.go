@@ -147,6 +147,16 @@ func runServer(args []string) {
 		if err := localSvc.ReconcileServerConfig(); err != nil {
 			log.Printf("startup: failed to reconcile rathole server config: %v", err)
 		}
+		// Re-sync the firewall's GOPHER_TUNNELS/GOPHER_CUSTOM chains from the DB
+		// on boot when gopher manages the firewall. Restores openings for tunnels
+		// created while gopher was down and heals drift from a crash mid-takeover.
+		// ReloadFirewall only touches the GOPHER_* chains — never the INPUT policy
+		// — so it can't lock the operator out. Best-effort.
+		if settings, sErr := db.GetSettings(); sErr == nil && settings.FirewallMode == "gopher" {
+			if err := localSvc.ReloadFirewall(); err != nil {
+				log.Printf("startup: failed to reconcile firewall: %v", err)
+			}
+		}
 		// One-shot upgrade from plaintext rathole transport → encrypted noise.
 		// Runs in a goroutine so a slow SSH push to one offline machine doesn't
 		// hold up the dashboard coming online. No-op on installs that have
