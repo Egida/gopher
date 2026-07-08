@@ -24,7 +24,7 @@ func TestBuildClientTunnelSection_UsesServerStyleDelimiters(t *testing.T) {
 }
 
 func TestGenerateMachineSSHClientConfig_UsesServerStyleDelimiters(t *testing.T) {
-	machine := &db.Machine{ID: "mac123", RatholeSSHToken: "ssh-token"}
+	machine := &db.Machine{ID: "mac123", TunnelPort: 2222, RatholeSSHToken: "ssh-token"}
 	cfg := config.GenerateMachineSSHClientConfig("router.example.com", machine, "")
 
 	if !strings.Contains(cfg, "# gopher-machine-start: mac123") {

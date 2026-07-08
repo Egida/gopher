@@ -64,12 +64,17 @@ func GenerateMachineSSHClientConfig(vpsHost string, machine *db.Machine, noisePu
 		b.WriteString(block)
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "# gopher-machine-start: %s\n", machine.ID)
-	fmt.Fprintf(&b, "[client.services.machine-%s-ssh]\n", machine.ID)
-	fmt.Fprintf(&b, "type = \"tcp\"\n")
-	fmt.Fprintf(&b, "token = \"%s\"\n", machine.RatholeSSHToken)
-	fmt.Fprintf(&b, "local_addr = \"0.0.0.0:22\"\n")
-	fmt.Fprintf(&b, "# gopher-machine-end: %s\n", machine.ID)
+	// SSH back-tunnel only when the machine has one — agent-only machines
+	// (SSH disabled at bootstrap) run with no SSH service, agent channel only.
+	// Matches the server-side gate in GenerateRatholeServerConfig.
+	if machine.RatholeSSHToken != "" && machine.TunnelPort != 0 {
+		fmt.Fprintf(&b, "# gopher-machine-start: %s\n", machine.ID)
+		fmt.Fprintf(&b, "[client.services.machine-%s-ssh]\n", machine.ID)
+		fmt.Fprintf(&b, "type = \"tcp\"\n")
+		fmt.Fprintf(&b, "token = \"%s\"\n", machine.RatholeSSHToken)
+		fmt.Fprintf(&b, "local_addr = \"0.0.0.0:22\"\n")
+		fmt.Fprintf(&b, "# gopher-machine-end: %s\n", machine.ID)
+	}
 
 	if hasAgentFields(machine) {
 		fmt.Fprintf(&b, "\n# gopher-machine-agent-start: %s\n", machine.ID)

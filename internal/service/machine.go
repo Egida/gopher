@@ -364,7 +364,7 @@ func (s *MachineService) ReassignSSHKey(machineID, newKeyID string) error {
 		return err
 	}
 	if machine.TunnelPort == 0 {
-		return fmt.Errorf("machine has no active tunnel — cannot push key")
+		return fmt.Errorf("SSH is disabled for this machine (agent-only) — there is no authorized_keys entry to manage")
 	}
 
 	// Agent-first: set the single managed key — no SSH, no stored private key

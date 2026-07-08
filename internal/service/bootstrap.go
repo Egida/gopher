@@ -38,7 +38,7 @@ func (s *BootstrapService) AllowAttempt(ip string) bool {
 // GenerateToken creates a one-time bootstrap token valid for 1 hour.
 // tunnelPort optionally pre-assigns the SSH tunnel port (0 = auto-allocate).
 // sshKeyID optionally pins the SSH key to install on the machine (empty = use default).
-func (s *BootstrapService) GenerateToken(tunnelPort int, sshKeyID string, publicSSH bool) (*db.BootstrapToken, error) {
+func (s *BootstrapService) GenerateToken(tunnelPort int, sshKeyID string, publicSSH, sshEnabled bool) (*db.BootstrapToken, error) {
 	bt := &db.BootstrapToken{
 		ID:         shortToken(),
 		Token:      shortToken(),
@@ -47,6 +47,7 @@ func (s *BootstrapService) GenerateToken(tunnelPort int, sshKeyID string, public
 		TunnelPort: tunnelPort,
 		SSHKeyID:   sshKeyID,
 		PublicSSH:  publicSSH,
+		SSHEnabled: sshEnabled,
 	}
 	if err := db.CreateBootstrapToken(bt); err != nil {
 		return nil, err
@@ -58,6 +59,11 @@ type BootstrapRequest struct {
 	Token    string `json:"token"`
 	Name     string `json:"name"`
 	Username string `json:"username"`
+	// NoSSH lets the client force an agent-only machine (bootstrap.sh --no-ssh),
+	// overriding the token even if it was generated with SSH enabled. SSH can
+	// only be turned OFF here, never on — enabling requires a key choice, which
+	// lives in the token.
+	NoSSH bool `json:"no_ssh"`
 }
 
 type BootstrapResponse struct {
@@ -90,36 +96,45 @@ func (s *BootstrapService) Register(req BootstrapRequest, serverHost string) (*B
 		return nil, fmt.Errorf("invalid or expired token")
 	}
 
-	// Retrieve the SSH key to use: token-pinned key → default → auto-generate.
+	// SSH is provisioned only when the token asked for it AND the client didn't
+	// opt out via --no-ssh. Disabled = agent-only machine: no SSH back-tunnel,
+	// no authorized_keys entry, control entirely over the agent channel.
+	sshEnabled := bt.SSHEnabled && !req.NoSSH
+
+	// Retrieve the SSH key to install — only when SSH is enabled. Order:
+	// token-pinned key → default → auto-generate. Agent-only machines skip this
+	// entirely (nil key, no key material touched).
 	var sshKey *db.SSHKey
-	if bt.SSHKeyID != "" {
-		sshKey, err = db.GetSSHKey(bt.SSHKeyID)
+	if sshEnabled {
+		if bt.SSHKeyID != "" {
+			sshKey, err = db.GetSSHKey(bt.SSHKeyID)
+			if err != nil {
+				return nil, fmt.Errorf("specified SSH key not found: %w", err)
+			}
+		} else {
+			sshKey, err = db.GetDefaultSSHKey()
+		}
 		if err != nil {
-			return nil, fmt.Errorf("specified SSH key not found: %w", err)
-		}
-	} else {
-		sshKey, err = db.GetDefaultSSHKey()
-	}
-	if err != nil {
-		// No key yet (user skipped setup step 3) — auto-generate one.
-		privKey, pubKey, kerr := sshpkg.GenerateRSAKeypair()
-		if kerr != nil {
-			return nil, fmt.Errorf("failed to generate SSH keypair: %w", kerr)
-		}
-		sshKey = &db.SSHKey{
-			ID:         shortToken(),
-			Name:       "Auto-generated",
-			PublicKey:  pubKey,
-			PrivateKey: privKey,
-			IsDefault:  true,
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
-		}
-		if kerr := db.CreateSSHKey(sshKey); kerr != nil {
-			return nil, fmt.Errorf("failed to save SSH keypair: %w", kerr)
-		}
-		if kerr := addToAuthorizedKeys(sshKey.PublicKey); kerr != nil {
-			fmt.Printf("WARN: could not add auto-generated key to authorized_keys: %v\n", kerr)
+			// No key yet (user skipped setup step 3) — auto-generate one.
+			privKey, pubKey, kerr := sshpkg.GenerateRSAKeypair()
+			if kerr != nil {
+				return nil, fmt.Errorf("failed to generate SSH keypair: %w", kerr)
+			}
+			sshKey = &db.SSHKey{
+				ID:         shortToken(),
+				Name:       "Auto-generated",
+				PublicKey:  pubKey,
+				PrivateKey: privKey,
+				IsDefault:  true,
+				CreatedAt:  time.Now(),
+				UpdatedAt:  time.Now(),
+			}
+			if kerr := db.CreateSSHKey(sshKey); kerr != nil {
+				return nil, fmt.Errorf("failed to save SSH keypair: %w", kerr)
+			}
+			if kerr := addToAuthorizedKeys(sshKey.PublicKey); kerr != nil {
+				fmt.Printf("WARN: could not add auto-generated key to authorized_keys: %v\n", kerr)
+			}
 		}
 	}
 
@@ -132,7 +147,7 @@ func (s *BootstrapService) Register(req BootstrapRequest, serverHost string) (*B
 	// NextRatholePort (which doesn't lock); the partial unique indexes on
 	// machines.tunnel_port and machines.agent_remote_port catch the second
 	// INSERT and we re-pick the next gap.
-	machine, err := allocatePortsAndCreateMachine(req, bt, sshKey, ratholeToken, agentToken, agentRatholeToken)
+	machine, err := allocatePortsAndCreateMachine(req, bt, sshKey, ratholeToken, agentToken, agentRatholeToken, sshEnabled)
 	if err != nil {
 		return nil, err
 	}
@@ -149,9 +164,17 @@ func (s *BootstrapService) Register(req BootstrapRequest, serverHost string) (*B
 	if err := s.local.AddMachineSSHTunnel(machine); err != nil {
 		fmt.Printf("WARN: failed to add rathole tunnel for machine %s: %v\n", machine.ID, err)
 	}
-	// Open (or restrict) the SSH tunnel port in the firewall.
-	// No-op when firewall mode is not "gopher"; safe to call unconditionally.
-	ApplyTunnelPort(machine.TunnelPort, "tcp", !machine.PublicSSH)
+	// Open the SSH tunnel port in the firewall — only for SSH-enabled machines
+	// (agent-only machines have no SSH port). Public SSH ports get per-source-IP
+	// rate-limiting; jumpbox (private) ports are restricted to loopback.
+	// No-op when firewall mode is not "gopher".
+	if sshEnabled && machine.TunnelPort > 0 {
+		if machine.PublicSSH {
+			ApplyPublicSSHPort(machine.TunnelPort)
+		} else {
+			ApplyTunnelPort(machine.TunnelPort, "tcp", true)
+		}
+	}
 
 	// Derive rathole server address from the request host (strip port if present).
 	ratholeHost := serverHost
@@ -165,6 +188,13 @@ func (s *BootstrapService) Register(req BootstrapRequest, serverHost string) (*B
 	}
 	ratholeConfig := config.GenerateMachineSSHClientConfig(ratholeHost, machine, noisePub)
 
+	// Only hand back a public key to install in authorized_keys when SSH is on.
+	// Agent-only machines get "" → bootstrap.sh skips the authorized_keys step.
+	vpsPublicKey := ""
+	if sshEnabled && sshKey != nil {
+		vpsPublicKey = sshKey.PublicKey
+	}
+
 	// Async: wait for the tunnel to come up (TCP probe, no SSH).
 	go goSafe("awaitTunnelHealth", func() { s.awaitTunnelHealth(machine) })
 	// Async: poll the agent's back-channel until it answers, so the bootstrap
@@ -176,7 +206,7 @@ func (s *BootstrapService) Register(req BootstrapRequest, serverHost string) (*B
 	return &BootstrapResponse{
 		TunnelPort:      machine.TunnelPort,
 		RatholeToken:    ratholeToken,
-		VPSPublicKey:    sshKey.PublicKey,
+		VPSPublicKey:    vpsPublicKey,
 		RatholeConfig:   ratholeConfig,
 		VPSHost:         ratholeHost,
 		AgentToken:      agentToken,
@@ -191,38 +221,55 @@ func (s *BootstrapService) Register(req BootstrapRequest, serverHost string) (*B
 // concurrent bootstraps can both pick the same gap; the second INSERT trips
 // the unique constraint and we re-scan for a fresh gap. Capped at a few
 // attempts so a runaway scan can't busy-loop the DB.
-func allocatePortsAndCreateMachine(req BootstrapRequest, bt *db.BootstrapToken, sshKey *db.SSHKey, ratholeToken, agentToken, agentRatholeToken string) (*db.Machine, error) {
+func allocatePortsAndCreateMachine(req BootstrapRequest, bt *db.BootstrapToken, sshKey *db.SSHKey, ratholeToken, agentToken, agentRatholeToken string, sshEnabled bool) (*db.Machine, error) {
 	const maxAttempts = 5
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		var tunnelPort int
-		if bt.TunnelPort != 0 {
-			// Token pinned a port. We can't re-pick on conflict — fail
-			// immediately if it's taken (the operator picked a port that's
-			// already in use, that's a config error not a race).
-			exists, portErr := db.CheckRatholePortExists(bt.TunnelPort)
-			if portErr != nil {
-				return nil, fmt.Errorf("failed to check port availability: %w", portErr)
-			}
-			if exists {
-				return nil, fmt.Errorf("port %d is already in use by another tunnel", bt.TunnelPort)
-			}
-			tunnelPort = bt.TunnelPort
-		} else {
-			var err error
-			tunnelPort, err = db.NextRatholePort()
-			if err != nil {
-				return nil, fmt.Errorf("failed to allocate tunnel port: %w", err)
+		// SSH tunnel port is allocated only for SSH-enabled machines. Agent-only
+		// machines run with TunnelPort=0 (exempt from the tunnel_port unique
+		// index, WHERE tunnel_port > 0) and no SSH service in the config.
+		tunnelPort := 0
+		if sshEnabled {
+			if bt.TunnelPort != 0 {
+				// Token pinned a port. We can't re-pick on conflict — fail
+				// immediately if it's taken (the operator picked a port that's
+				// already in use, that's a config error not a race).
+				exists, portErr := db.CheckRatholePortExists(bt.TunnelPort)
+				if portErr != nil {
+					return nil, fmt.Errorf("failed to check port availability: %w", portErr)
+				}
+				if exists {
+					return nil, fmt.Errorf("port %d is already in use by another tunnel", bt.TunnelPort)
+				}
+				tunnelPort = bt.TunnelPort
+			} else {
+				var err error
+				tunnelPort, err = db.NextRatholePort()
+				if err != nil {
+					return nil, fmt.Errorf("failed to allocate tunnel port: %w", err)
+				}
 			}
 		}
 
 		// Pass tunnelPort to exclude it from the agent allocation: the SSH
 		// tunnel port we just picked isn't in the DB yet, so without the
 		// exclude both calls would return the same port and rathole-server
-		// would try to bind two services to the same address.
+		// would try to bind two services to the same address. (Excluding 0 for
+		// agent-only machines is a harmless no-op.)
 		agentRemotePort, err := db.NextRatholePort(tunnelPort)
 		if err != nil {
 			return nil, fmt.Errorf("failed to allocate agent port: %w", err)
+		}
+
+		// SSH identity fields only when SSH is on; agent-only machines leave them
+		// zero so every SSH gate (TunnelPort>0 / SSHKeyID) short-circuits.
+		sshKeyID := ""
+		sshToken := ""
+		publicSSH := false
+		if sshEnabled {
+			sshKeyID = sshKey.ID
+			sshToken = ratholeToken
+			publicSSH = bt.PublicSSH
 		}
 
 		machine := &db.Machine{
@@ -230,9 +277,9 @@ func allocatePortsAndCreateMachine(req BootstrapRequest, bt *db.BootstrapToken, 
 			Name:              req.Name,
 			Username:          req.Username,
 			TunnelPort:        tunnelPort,
-			RatholeSSHToken:   ratholeToken,
-			SSHKeyID:          sshKey.ID,
-			PublicSSH:         bt.PublicSSH,
+			RatholeSSHToken:   sshToken,
+			SSHKeyID:          sshKeyID,
+			PublicSSH:         publicSSH,
 			Status:            "pending",
 			AgentToken:        agentToken,
 			AgentLocalPort:    agentLocalPortDefault,

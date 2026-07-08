@@ -118,6 +118,25 @@ func TestGenerateMachineSSHClientConfig_EmitsNoiseTransport(t *testing.T) {
 	}
 }
 
+// An agent-only machine (SSH disabled at bootstrap → TunnelPort 0) must emit NO
+// SSH service, but must still emit the agent back-channel.
+func TestGenerateMachineSSHClientConfig_AgentOnly_NoSSHService(t *testing.T) {
+	m := &db.Machine{
+		ID: "m1", TunnelPort: 0, RatholeSSHToken: "",
+		AgentRatholeToken: "atok", AgentLocalPort: 4322, AgentRemotePort: 9100,
+	}
+	out := GenerateMachineSSHClientConfig("vps.example.com", m, "")
+	if strings.Contains(out, "machine-m1-ssh") {
+		t.Errorf("agent-only machine should not emit an SSH service:\n%s", out)
+	}
+	if strings.Contains(out, `local_addr = "0.0.0.0:22"`) {
+		t.Errorf("agent-only machine should not forward local sshd:\n%s", out)
+	}
+	if !strings.Contains(out, "machine-m1-agent") {
+		t.Errorf("agent back-channel service missing:\n%s", out)
+	}
+}
+
 // ---- GenerateRatholeServerConfig --------------------------------------------
 
 func TestGenerateRatholeServerConfig_Empty(t *testing.T) {
@@ -235,7 +254,7 @@ func TestGenerateRatholeServerConfig_NoPlaceholderWhenHasMachines(t *testing.T) 
 // ---- GenerateMachineSSHClientConfig -----------------------------------------
 
 func TestGenerateMachineSSHClientConfig(t *testing.T) {
-	m := &db.Machine{ID: "m1", RatholeSSHToken: "my-token"}
+	m := &db.Machine{ID: "m1", TunnelPort: 2222, RatholeSSHToken: "my-token"}
 	out := GenerateMachineSSHClientConfig("vps.example.com", m, "")
 
 	if !strings.Contains(out, `remote_addr = "vps.example.com:2333"`) {

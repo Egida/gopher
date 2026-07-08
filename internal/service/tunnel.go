@@ -423,7 +423,7 @@ func (s *TunnelService) updateMachineSSHPrivacy(machineID string, private bool) 
 			log.Printf("tunnel update: reconcile failed: %v", err)
 		}
 		if machine.PublicSSH {
-			ApplyTunnelPort(machine.TunnelPort, "tcp", false)
+			ApplyPublicSSHPort(machine.TunnelPort) // public SSH → edge rate-limited
 		} else {
 			ApplyTunnelPort(machine.TunnelPort, "tcp", true)
 		}

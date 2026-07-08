@@ -363,10 +363,10 @@ func firewallOpenExistingTunnelPorts(logWriter io.Writer) error {
 			continue
 		}
 		if m.PublicSSH {
-			if err := iptablesOpenPort(m.TunnelPort, "tcp"); err != nil {
+			if err := iptablesOpenPortRateLimited(m.TunnelPort, "tcp"); err != nil {
 				fmt.Fprintf(logWriter, "  WARN: port %d/tcp (machine %s SSH, public): %v\n", m.TunnelPort, m.ID, err)
 			} else {
-				fmt.Fprintf(logWriter, "  Opened port %d/tcp (machine %s SSH, public)\n", m.TunnelPort, m.ID)
+				fmt.Fprintf(logWriter, "  Opened port %d/tcp with rate limit (machine %s SSH, public)\n", m.TunnelPort, m.ID)
 			}
 		} else {
 			if err := iptablesMakePrivate(m.TunnelPort, "tcp"); err != nil {
@@ -486,6 +486,27 @@ func ApplyTunnelPort(port int, transport string, private bool) {
 	persistRules()
 }
 
+// ApplyPublicSSHPort opens a publicly-exposed SSH tunnel port with edge-side
+// per-source-IP connection rate limiting. This is the defense for public SSH:
+// the rathole tunnel hides the real client IP from the origin's sshd (it sees
+// 127.0.0.1), so origin-side fail2ban can't work — the edge is the only place
+// that sees the attacker's IP and can throttle brute force. No-op unless gopher
+// manages the firewall.
+func ApplyPublicSSHPort(port int) {
+	settings, err := db.GetSettings()
+	if err != nil || settings.FirewallMode != "gopher" {
+		return
+	}
+	if !firewallChainExists() {
+		return
+	}
+	if err := iptablesOpenPortRateLimited(port, "tcp"); err != nil {
+		log.Printf("firewall: could not open public SSH port %d: %v", port, err)
+		return
+	}
+	persistRules()
+}
+
 // ApplyDashboardPort opens or restricts the dashboard port based on the
 // DashboardPrivate setting. No-op if not in Gopher-managed firewall mode.
 func ApplyDashboardPort(private bool) {
@@ -550,12 +571,65 @@ func iptablesOpenPort(port int, proto string) error {
 	return nil
 }
 
+// Per-source-IP new-connection rate limit for public SSH ports. Under the
+// threshold, connections pass; a source above it is dropped until it backs off.
+// Tuned for legitimate use (a human reconnecting) while blunting brute force.
+const (
+	sshRateLimit = "6/min"
+	sshRateBurst = "6"
+)
+
+// sshRateLimitDropSpec is the hashlimit DROP rule that precedes the ACCEPT for a
+// public SSH port. Kept in one place so open and close use identical args (an
+// iptables -D must match the -A byte-for-byte).
+func sshRateLimitDropSpec(portStr string) []string {
+	return []string{
+		"-p", "tcp", "--dport", portStr,
+		"-m", "conntrack", "--ctstate", "NEW",
+		"-m", "hashlimit",
+		"--hashlimit-above", sshRateLimit,
+		"--hashlimit-burst", sshRateBurst,
+		"--hashlimit-mode", "srcip",
+		"--hashlimit-name", "gopher_ssh_" + portStr,
+		"-j", "DROP",
+	}
+}
+
+// iptablesOpenPortRateLimited lays down the [rate-limit DROP, ACCEPT] pair for a
+// public SSH port, in that order. It first clears any existing rules for the
+// port (plain accept, private, or a stale pair) so the ordering is deterministic
+// every reconcile. During the brief rebuild the port falls through to the
+// INPUT DROP policy (fail-closed), never open.
+func iptablesOpenPortRateLimited(port int, proto string) error {
+	portStr := strconv.Itoa(port)
+	// Clear prior rules for this port so we can re-lay the pair in order.
+	iptablesDeleteRule(gopherChain, "-p", proto, "--dport", portStr, "-j", "ACCEPT")
+	iptablesDeleteRule(gopherChain, "-p", proto, "--dport", portStr, "-s", "127.0.0.1", "-j", "ACCEPT")
+	iptablesDeleteRule(gopherChain, "-p", proto, "--dport", portStr, "-j", "DROP")
+	iptablesDeleteRule(gopherChain, sshRateLimitDropSpec(portStr)...)
+
+	dropArgs := append([]string{"-n", "iptables", "-A", gopherChain}, sshRateLimitDropSpec(portStr)...)
+	if out, err := exec.Command("sudo", dropArgs...).CombinedOutput(); err != nil { // #nosec G204
+		return fmt.Errorf("iptables add SSH rate-limit: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	acceptCmd := exec.Command("sudo", "-n", "iptables", "-A", gopherChain, // #nosec G204
+		"-p", proto, "--dport", portStr, "-j", "ACCEPT")
+	if out, err := acceptCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("iptables add SSH accept: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // iptablesClosePort removes all GOPHER_TUNNELS rules for port/proto.
 func iptablesClosePort(port int, proto string) {
 	portStr := strconv.Itoa(port)
 	iptablesDeleteRule(gopherChain, "-p", proto, "--dport", portStr, "-j", "ACCEPT")
 	iptablesDeleteRule(gopherChain, "-p", proto, "--dport", portStr, "-s", "127.0.0.1", "-j", "ACCEPT")
 	iptablesDeleteRule(gopherChain, "-p", proto, "--dport", portStr, "-j", "DROP")
+	// Also drop the public-SSH rate-limit rule, if this was such a port.
+	if proto == "tcp" {
+		iptablesDeleteRule(gopherChain, sshRateLimitDropSpec(portStr)...)
+	}
 }
 
 // iptablesMakePrivate restricts port to localhost, dropping all external traffic.

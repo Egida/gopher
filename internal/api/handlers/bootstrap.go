@@ -57,12 +57,18 @@ func (h *BootstrapHandler) GenerateToken(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		TunnelPort int    `json:"tunnel_port"`
 		SSHKeyID   string `json:"ssh_key_id"`
-		PublicSSH  bool   `json:"public_ssh"`
+		PublicSSH  *bool  `json:"public_ssh"`
+		SSHEnabled *bool  `json:"ssh_enabled"`
 	}
 	// Body is optional; ignore decode errors so a plain POST with no body still works.
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	bt, err := h.svc.GenerateToken(req.TunnelPort, req.SSHKeyID, req.PublicSSH)
+	// Defaults when unspecified: SSH enabled, publicly reachable. The
+	// security-conscious opt into jumpbox-gating or disable SSH entirely.
+	sshEnabled := req.SSHEnabled == nil || *req.SSHEnabled
+	publicSSH := req.PublicSSH == nil || *req.PublicSSH
+
+	bt, err := h.svc.GenerateToken(req.TunnelPort, req.SSHKeyID, publicSSH, sshEnabled)
 	if err != nil {
 		response.InternalError(w, err.Error())
 		return
@@ -70,6 +76,11 @@ func (h *BootstrapHandler) GenerateToken(w http.ResponseWriter, r *http.Request)
 
 	base := hostURL(r)
 	bootstrapCmd := fmt.Sprintf("curl -fsSL %s/static/bootstrap.sh | bash -s -- %s", base, bt.Token)
+	// Surface the disable as a visible flag so the copied command is honest and
+	// CLI users can reproduce it. Register honors --no-ssh authoritatively.
+	if !sshEnabled {
+		bootstrapCmd += " --no-ssh"
+	}
 
 	response.Success(w, map[string]string{
 		"token":             bt.Token,
@@ -196,11 +207,11 @@ func (h *BootstrapHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 		noisePub = settings.RatholeNoisePubKey
 	}
 	response.Success(w, map[string]any{
-		"machine_id":     machine.ID,
-		"agent_token":    machine.AgentToken,
-		"agent_port":     machine.AgentLocalPort,
-		"rathole_token":  machine.AgentRatholeToken,
-		"noise_pubkey":   noisePub,
+		"machine_id":    machine.ID,
+		"agent_token":   machine.AgentToken,
+		"agent_port":    machine.AgentLocalPort,
+		"rathole_token": machine.AgentRatholeToken,
+		"noise_pubkey":  noisePub,
 	})
 }
 

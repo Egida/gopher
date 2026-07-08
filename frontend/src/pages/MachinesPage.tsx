@@ -57,10 +57,12 @@ export default function MachinesPage() {
   const [bootstrapModal, setBootstrapModal] = useState<BootstrapModal>({ isOpen: false, command: '', token: '', expiresAt: '', phase: 'waiting' })
   const knownMachineIds = useRef<Set<string>>(new Set())
   const bootstrapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [configModal, setConfigModal] = useState(false)
   const [tunnelPortInput, setTunnelPortInput] = useState('')
   const [sshKeyInput, setSSHKeyInput] = useState('')
-  const [publicSSHInput, setPublicSSHInput] = useState(false)
+  const [publicSSHInput, setPublicSSHInput] = useState(true)   // public by default; unchecked "jumpbox" flips it
+  const [sshEnabledInput, setSSHEnabledInput] = useState(true) // SSH on by default; off = agent-only
+  const [sshSectionOpen, setSSHSectionOpen] = useState(false)  // collapsed by default (defaults are fine)
+  const [cfgDirty, setCfgDirty] = useState(false)              // config changed since the command was generated
   const [copied, setCopied] = useState(false)
   const [tokenLoading, setTokenLoading] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -233,23 +235,41 @@ export default function MachinesPage() {
     onError: (e: Error) => toast.error(`Agent install failed: ${e.message}`),
   })
 
-  const openConfigModal = () => {
+  // Open the combined bootstrap modal with defaults (SSH on, public) and
+  // immediately generate a command so the common path is just open → copy.
+  const openBootstrapModal = () => {
     setTunnelPortInput('')
     setSSHKeyInput('')
-    setPublicSSHInput(false)
-    setConfigModal(true)
+    setPublicSSHInput(true)
+    setSSHEnabledInput(true)
+    setSSHSectionOpen(false)
+    setBootstrapModal({ isOpen: true, command: '', token: '', expiresAt: '', phase: 'waiting' })
+    void generateToken({ sshEnabled: true, publicSSH: true, keyID: '', port: '' })
   }
 
-  const generateToken = async () => {
-    const port = tunnelPortInput ? parseInt(tunnelPortInput, 10) : undefined
-    const keyID = sshKeyInput || undefined
+  // Generate (or regenerate) the bootstrap token + command for the current
+  // config. Accepts an explicit override so openBootstrapModal doesn't race the
+  // input state it just set. Regenerating supersedes the prior one-time token
+  // (which simply expires unused).
+  const generateToken = async (override?: { sshEnabled: boolean; publicSSH: boolean; keyID: string; port: string }) => {
+    const sshEnabled = override ? override.sshEnabled : sshEnabledInput
+    const publicSSH = override ? override.publicSSH : publicSSHInput
+    const keyRaw = override ? override.keyID : sshKeyInput
+    const portRaw = override ? override.port : tunnelPortInput
+    const port = portRaw ? parseInt(portRaw, 10) : undefined
     setTokenLoading(true)
     try {
-      const result = await vpsApi.generateToken(port, keyID, publicSSHInput)
+      const result = await vpsApi.generateToken({
+        tunnelPort: sshEnabled ? port : undefined,
+        sshKeyID: sshEnabled ? (keyRaw || undefined) : undefined,
+        publicSSH: sshEnabled ? publicSSH : undefined,
+        sshEnabled,
+      })
       if (result?.data) {
-        // Snapshot current machine IDs so we can detect the new registration
+        // Snapshot current machine IDs so we can detect the new registration.
         knownMachineIds.current = new Set(machines.map(m => m.id))
-        setConfigModal(false)
+        if (bootstrapTimeoutRef.current) clearTimeout(bootstrapTimeoutRef.current)
+        setCfgDirty(false)
         setBootstrapModal({
           isOpen: true,
           command: result.data.bootstrap_command,
@@ -272,6 +292,9 @@ export default function MachinesPage() {
       setTokenLoading(false)
     }
   }
+
+  // Mark the generated command stale when the operator edits SSH config.
+  const markCfgDirty = () => setCfgDirty(true)
 
   const copyCommand = () => {
     navigator.clipboard.writeText(bootstrapModal.command).then(() => {
@@ -308,7 +331,7 @@ export default function MachinesPage() {
           <p className="text-gray-500 mt-1">Servers registered via bootstrap tunnel</p>
         </div>
         <button
-          onClick={openConfigModal}
+          onClick={openBootstrapModal}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
         >
           + Bootstrap New Machine
@@ -323,7 +346,7 @@ export default function MachinesPage() {
             Generate a bootstrap token and run the script on any machine to register it automatically via reverse SSH tunnel.
           </p>
           <button
-            onClick={openConfigModal}
+            onClick={openBootstrapModal}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
           >
             Generate Bootstrap Token
@@ -459,7 +482,11 @@ export default function MachinesPage() {
                           {/* SSH key row */}
                           <div className="flex items-center gap-2 mb-2">
                             <Key size={11} className="text-gray-400 shrink-0" />
-                            {reassigning === m.id ? (
+                            {m.tunnel_port === 0 ? (
+                              <span className="text-xs text-gray-500">
+                                SSH access: <span className="font-medium text-gray-700">Disabled (agent-only)</span>
+                              </span>
+                            ) : reassigning === m.id ? (
                               <>
                                 <select
                                   value={reassignKeyID}
@@ -620,87 +647,7 @@ export default function MachinesPage() {
       )}
 
       {/* Bootstrap Config Modal */}
-      {configModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 overflow-y-auto"><div className="flex min-h-full items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-lg font-semibold">Bootstrap New Machine</h2>
-              <button
-                onClick={() => setConfigModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                ×
-              </button>
-            </div>
-            <div className="p-4 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  SSH Key <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <select
-                  value={sshKeyInput}
-                  onChange={e => setSSHKeyInput(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                >
-                  <option value="">Use default key</option>
-                  {sshKeys.map(k => (
-                    <option key={k.id} value={k.id}>
-                      {k.name}{k.is_default ? ' (default)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1">The selected key's public key will be installed on the machine.</p>
-              </div>
-              <div>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={publicSSHInput}
-                    onChange={e => setPublicSSHInput(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <div>
-                    <span className="text-sm font-medium text-gray-700">Public SSH access</span>
-                    <p className="text-xs text-gray-400">Expose the SSH port publicly on the VPS (0.0.0.0). Default is private (127.0.0.1, jumpbox only).</p>
-                  </div>
-                </label>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  SSH Tunnel Port <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <input
-                  type="number"
-                  value={tunnelPortInput}
-                  onChange={e => setTunnelPortInput(e.target.value)}
-                  placeholder="Auto-assign"
-                  min={1}
-                  max={65535}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-xs text-gray-400 mt-1">Leave blank to auto-assign the next available port.</p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 p-4 border-t">
-              <button
-                onClick={() => setConfigModal(false)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={generateToken}
-                disabled={tokenLoading}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50"
-              >
-                {tokenLoading ? 'Generating...' : 'Generate Token'}
-              </button>
-            </div>
-          </div>
-        </div></div>
-      )}
-
-      {/* Bootstrap Token Modal */}
+      {/* Bootstrap New Machine — combined config + command modal */}
       {bootstrapModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 overflow-y-auto"><div className="flex min-h-full items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
@@ -725,33 +672,130 @@ export default function MachinesPage() {
               </div>
             ) : (
               <div className="p-4 space-y-4">
-                <p className="text-sm text-gray-600">
-                  Run this command on the machine you want to register. The machine will self-configure and establish a reverse SSH tunnel to the VPS.
-                </p>
+                {/* SSH access — collapsed by default; defaults are SSH on + public */}
+                <div className="border border-gray-200 rounded-lg">
+                  <button
+                    onClick={() => setSSHSectionOpen(o => !o)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm"
+                  >
+                    <span className="flex items-center gap-2 text-gray-700">
+                      {sshSectionOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                      <span className="font-medium">SSH access</span>
+                    </span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      !sshEnabledInput ? 'bg-gray-100 text-gray-500'
+                        : publicSSHInput ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'
+                    }`}>
+                      {!sshEnabledInput ? 'Disabled (agent-only)' : publicSSHInput ? 'Public' : 'Jumpbox-gated'}
+                    </span>
+                  </button>
+                  {sshSectionOpen && (
+                    <div className="px-3 pb-3 pt-1 space-y-3 border-t border-gray-100">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={sshEnabledInput}
+                          onChange={e => { setSSHEnabledInput(e.target.checked); markCfgDirty() }}
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div>
+                          <span className="text-sm font-medium text-gray-700">Enable SSH access</span>
+                          <p className="text-xs text-gray-400">Off = agent-only: no SSH tunnel or <code className="bg-gray-100 px-1 rounded">authorized_keys</code> entry; control runs entirely over the agent.</p>
+                        </div>
+                      </label>
+                      {sshEnabledInput && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              SSH Key <span className="text-gray-400 font-normal">(optional)</span>
+                            </label>
+                            <select
+                              value={sshKeyInput}
+                              onChange={e => { setSSHKeyInput(e.target.value); markCfgDirty() }}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                            >
+                              <option value="">Use default key</option>
+                              {sshKeys.map(k => (
+                                <option key={k.id} value={k.id}>
+                                  {k.name}{k.is_default ? ' (default)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="text-xs text-gray-400 mt-1">The selected key's public key is installed on the machine.</p>
+                          </div>
+                          <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!publicSSHInput}
+                              onChange={e => { setPublicSSHInput(!e.target.checked); markCfgDirty() }}
+                              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <div>
+                              <span className="text-sm font-medium text-gray-700">Jumpbox-gated (private)</span>
+                              <p className="text-xs text-gray-400">Reach the box only via <code className="bg-gray-100 px-1 rounded">ssh -J</code> through the VPS. Default is public: sshd is reachable on the VPS public IP (rate-limited at the edge).</p>
+                            </div>
+                          </label>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              SSH Tunnel Port <span className="text-gray-400 font-normal">(optional)</span>
+                            </label>
+                            <input
+                              type="number"
+                              value={tunnelPortInput}
+                              onChange={e => { setTunnelPortInput(e.target.value); markCfgDirty() }}
+                              placeholder="Auto-assign"
+                              min={1}
+                              max={65535}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {sshEnabledInput && publicSSHInput && (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    This machine's SSH will be reachable on the internet (rate-limited at the edge). Choose Jumpbox-gated above for private access, or disable SSH for an agent-only machine.
+                  </div>
+                )}
+
+                <p className="text-sm text-gray-600">Run this on the machine you want to register — it self-configures and connects back to the VPS.</p>
+
                 <div className="relative">
-                  <pre className="bg-gray-900 text-green-400 text-xs rounded-lg p-4 pr-12 overflow-x-auto whitespace-pre-wrap break-all">
-                    {bootstrapModal.command}
+                  <pre className="bg-gray-900 text-green-400 text-xs rounded-lg p-4 pr-12 overflow-x-auto whitespace-pre-wrap break-all min-h-[3rem]">
+                    {bootstrapModal.command || 'Generating…'}
                   </pre>
                   <button
                     onClick={copyCommand}
-                    className="absolute top-2 right-2 p-1.5 bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
+                    disabled={!bootstrapModal.command}
+                    className="absolute top-2 right-2 p-1.5 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 disabled:opacity-40"
                     title="Copy command"
                   >
                     {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
                   </button>
                 </div>
-                <div className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  ⏱ Token expires at: {new Date(bootstrapModal.expiresAt).toLocaleString()} (1 hour)
-                </div>
-                <div className="text-xs text-gray-400 space-y-1">
-                  <p>The script will:</p>
-                  <ol className="list-decimal ml-4 space-y-0.5">
-                    <li>Register the machine with this Gopher instance</li>
-                    <li>Install the VPS SSH public key in <code className="bg-gray-100 px-1 rounded">~/.ssh/authorized_keys</code></li>
-                    <li>Install and configure rathole as a reverse tunnel client</li>
-                    <li>Enable a systemd service to keep the tunnel running</li>
-                  </ol>
-                </div>
+
+                {cfgDirty && (
+                  <div className="flex items-center justify-between gap-3 text-xs bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                    <span className="text-blue-700">SSH settings changed — regenerate to update the command.</span>
+                    <button
+                      onClick={() => generateToken()}
+                      disabled={tokenLoading}
+                      className="px-2.5 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 shrink-0"
+                    >
+                      {tokenLoading ? 'Regenerating…' : 'Regenerate'}
+                    </button>
+                  </div>
+                )}
+
+                {bootstrapModal.expiresAt && (
+                  <div className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    ⏱ Token expires at: {new Date(bootstrapModal.expiresAt).toLocaleString()} (1 hour)
+                  </div>
+                )}
+
                 {/* Phase indicator — waiting → verifying → success/timeout */}
                 <div className={`flex items-center gap-2 text-xs rounded-lg px-3 py-2 ${
                   bootstrapModal.phase === 'timeout'

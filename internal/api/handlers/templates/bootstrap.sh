@@ -1,7 +1,20 @@
 #!/bin/bash
 
 HOST_URL="{{.HostURL}}"
-TOKEN="$1"
+
+# Parse args: the bootstrap token plus optional flags. --no-ssh provisions an
+# agent-only machine — no SSH back-tunnel, no authorized_keys entry; control runs
+# entirely over the agent. The flag is authoritative: the server honors it
+# regardless of the token's SSH setting (SSH can only be turned off here).
+TOKEN=""
+NO_SSH=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-ssh) NO_SSH=1 ;;
+    -*) echo "Warning: unknown flag $arg" >&2 ;;
+    *) [ -z "$TOKEN" ] && TOKEN="$arg" ;;
+  esac
+done
 
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 
@@ -15,8 +28,9 @@ AGENT_DIR="/etc/gopher/agent"
 AGENT_CFG="$AGENT_DIR/config.env"
 
 if [ -z "$TOKEN" ]; then
-  echo "Usage: bash bootstrap.sh <TOKEN>"
+  echo "Usage: bash bootstrap.sh <TOKEN> [--no-ssh]"
   echo "Example: curl -s {{.HostURL}}/static/bootstrap.sh | bash -s -- TOKEN"
+  echo "  --no-ssh   agent-only machine: no SSH back-tunnel or authorized_keys entry"
   exit 1
 fi
 
@@ -96,9 +110,11 @@ handle_sudo_failure() {
 # ── Register with control plane ───────────────────────────────────────────────
 echo ""
 echo "Registering with Gopher control plane..."
+NO_SSH_JSON=""
+if [ "$NO_SSH" = "1" ]; then NO_SSH_JSON=',"no_ssh":true'; fi
 RESPONSE=$(curl -sS -w "\n__HTTP_STATUS__:%{http_code}" -X POST "$HOST_URL/api/bootstrap" \
   -H "Content-Type: application/json" \
-  -d "{\"token\":\"$TOKEN\",\"name\":\"$MACHINE_NAME\",\"username\":\"$SSH_USER\"}" 2>&1)
+  -d "{\"token\":\"$TOKEN\",\"name\":\"$MACHINE_NAME\",\"username\":\"$SSH_USER\"$NO_SSH_JSON}" 2>&1)
 
 HTTP_STATUS=$(printf '%s' "$RESPONSE" | tail -1 | sed 's/.*__HTTP_STATUS__://')
 RESPONSE=$(printf '%s' "$RESPONSE" | sed '$d' | sed 's/__HTTP_STATUS__:[0-9]*//')
@@ -137,29 +153,33 @@ if [ -z "$RATHOLE_CONFIG" ] || [ "$RATHOLE_CONFIG" = "null" ]; then
   echo "$RESPONSE"
   exit 1
 fi
-if [ -z "$VPS_PUBLIC_KEY" ] || [ "$VPS_PUBLIC_KEY" = "null" ]; then
-  echo "ERROR: server did not return its SSH public key; aborting."
-  echo "$RESPONSE"
-  exit 1
-fi
-
 echo "Registered! Tunnel port: $TUNNEL_PORT"
 
 # ── Install VPS SSH key ───────────────────────────────────────────────────────
-# Gopher manages exactly ONE key, tagged with the `gopher-managed` comment. We
-# drop any prior gopher-managed key and write this one, so re-bootstraps never
-# accumulate stale server keys. Operator-owned keys (any without the marker) are
-# left untouched.
-echo "Installing server SSH key to authorized_keys..."
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-touch ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-MANAGED_LINE=$(printf '%s\n' "$VPS_PUBLIC_KEY" | awk 'NF>=2 {print $1, $2, "gopher-managed"; exit}')
-grep -v ' gopher-managed[[:space:]]*$' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp 2>/dev/null || true
-printf '%s\n' "$MANAGED_LINE" >> ~/.ssh/authorized_keys.tmp
-mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
+# Agent-only machines (--no-ssh) get no server key: the server returns an empty
+# key and we skip the authorized_keys install entirely. Otherwise Gopher manages
+# exactly ONE key, tagged with the `gopher-managed` comment — we drop any prior
+# gopher-managed key and write this one, so re-bootstraps never accumulate stale
+# keys. Operator-owned keys (any without the marker) are left untouched.
+if [ "$NO_SSH" = "1" ]; then
+  echo "SSH access disabled for this machine (agent-only) — skipping authorized_keys install."
+else
+  if [ -z "$VPS_PUBLIC_KEY" ] || [ "$VPS_PUBLIC_KEY" = "null" ]; then
+    echo "ERROR: server did not return its SSH public key; aborting."
+    echo "$RESPONSE"
+    exit 1
+  fi
+  echo "Installing server SSH key to authorized_keys..."
+  mkdir -p ~/.ssh
+  chmod 700 ~/.ssh
+  touch ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/authorized_keys
+  MANAGED_LINE=$(printf '%s\n' "$VPS_PUBLIC_KEY" | awk 'NF>=2 {print $1, $2, "gopher-managed"; exit}')
+  grep -v ' gopher-managed[[:space:]]*$' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp 2>/dev/null || true
+  printf '%s\n' "$MANAGED_LINE" >> ~/.ssh/authorized_keys.tmp
+  mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/authorized_keys
+fi
 
 # ── Install rathole binary ────────────────────────────────────────────────────
 echo "Installing rathole..."
@@ -218,8 +238,11 @@ echo "$RATHOLE_CONFIG" | $SUDO tee "$CLIENT_CFG" >/dev/null || handle_sudo_failu
 $SUDO chown "$SSH_USER" "$CLIENT_CFG" || handle_sudo_failure
 
 # Save VPS public key so the uninstall script can remove it from authorized_keys
-# even without a live connection to the server.
-echo "$VPS_PUBLIC_KEY" | $SUDO tee "$VPS_KEY_FILE" >/dev/null || true
+# even without a live connection to the server. Skipped for agent-only machines
+# (no key was installed, so there's nothing for uninstall to remove).
+if [ "$NO_SSH" != "1" ] && [ -n "$VPS_PUBLIC_KEY" ] && [ "$VPS_PUBLIC_KEY" != "null" ]; then
+  echo "$VPS_PUBLIC_KEY" | $SUDO tee "$VPS_KEY_FILE" >/dev/null || true
+fi
 
 # ── Install gopher-uninstall script ──────────────────────────────────────────
 echo "Installing gopher-uninstall script..."

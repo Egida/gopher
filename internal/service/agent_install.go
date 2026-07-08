@@ -144,8 +144,11 @@ func (i *AgentInstaller) UpgradeAgent(machine *db.Machine) error {
 // machine record is missing them. Pre-agent-era machines have these fields
 // at their zero value; new bootstraps populate them at registration time.
 func (i *AgentInstaller) allocateAgentFields(machine *db.Machine) error {
-	if machine.TunnelPort == 0 {
-		return fmt.Errorf("machine has no tunnel port; bootstrap may be incomplete")
+	// A machine with neither an SSH tunnel nor agent fields was never fully
+	// bootstrapped. Agent-only machines legitimately have TunnelPort==0 but a
+	// valid AgentRemotePort, so gate on both being zero.
+	if machine.TunnelPort == 0 && machine.AgentRemotePort == 0 {
+		return fmt.Errorf("machine has no tunnel or agent port; bootstrap may be incomplete")
 	}
 	dirty := false
 	if machine.AgentLocalPort == 0 {

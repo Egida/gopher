@@ -134,7 +134,12 @@ type BootstrapToken struct {
 	TunnelPort int        `json:"tunnel_port"`
 	SSHKeyID   string     `json:"ssh_key_id"`
 	PublicSSH  bool       `json:"public_ssh"`
-	CreatedAt  time.Time  `json:"created_at"`
+	// SSHEnabled controls whether this bootstrap provisions an SSH back-tunnel +
+	// authorized_keys entry at all. False = agent-only machine (no SSH exposure,
+	// control via the agent only). Set from the UI/API; the client can still
+	// force it off via the bootstrap script's --no-ssh flag.
+	SSHEnabled bool      `json:"ssh_enabled"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // MigrationToken is the short ephemeral token used by the agent-install
