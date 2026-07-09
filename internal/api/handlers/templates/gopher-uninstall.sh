@@ -110,7 +110,10 @@ if [ -z "$HOST_URL" ]; then
 elif [ ! -f "$AGENT_CONFIG" ]; then
   echo "Skipping server notification: $AGENT_CONFIG missing (agent not installed, or pre-agent machine)."
 else
-  AGENT_TOKEN=$(grep -E '^GOPHER_AGENT_TOKEN=' "$AGENT_CONFIG" 2>/dev/null | head -1 | cut -d= -f2-)
+  # Read via $SUDO: the config is chmod 640 root:gopher (the bearer token is
+  # deliberately not world-readable), so a plain grep run by a non-root operator
+  # silently reads nothing and we'd wrongly report the token as missing.
+  AGENT_TOKEN=$($SUDO grep -E '^GOPHER_AGENT_TOKEN=' "$AGENT_CONFIG" 2>/dev/null | head -1 | cut -d= -f2-)
   if [ -z "$AGENT_TOKEN" ]; then
     echo "Skipping server notification: GOPHER_AGENT_TOKEN not found in $AGENT_CONFIG."
   else
