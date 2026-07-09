@@ -81,24 +81,28 @@ func (s *TunnelService) List() ([]db.Tunnel, error) {
 		return nil, err
 	}
 	for _, machine := range machines {
-		if machine.TunnelPort == 0 {
-			continue
+		// SSH tunnel — only for SSH-enabled machines. The agent back-channel
+		// below is synthesized INDEPENDENTLY so agent-only machines (SSH disabled
+		// → TunnelPort 0) still surface their control-plane tunnel. A `continue`
+		// here previously skipped both, hiding agent-only machines everywhere the
+		// tunnel list is consumed (tunnels page, network map).
+		if machine.TunnelPort != 0 {
+			tunnels = append(tunnels, db.Tunnel{
+				ID:          machineSSHTunnelID(machine.ID),
+				MachineID:   machine.ID,
+				Name:        machine.Name + " SSH",
+				Subdomain:   "",
+				LocalPort:   22,
+				RatholePort: machine.TunnelPort,
+				Protocol:    "tcp",
+				Private:     !machine.PublicSSH,
+				Status:      machineTunnelStatus(machine.Status),
+				Managed:     true,
+				Kind:        "machine-ssh",
+				CreatedAt:   machine.CreatedAt,
+				UpdatedAt:   machine.UpdatedAt,
+			})
 		}
-		tunnels = append(tunnels, db.Tunnel{
-			ID:          machineSSHTunnelID(machine.ID),
-			MachineID:   machine.ID,
-			Name:        machine.Name + " SSH",
-			Subdomain:   "",
-			LocalPort:   22,
-			RatholePort: machine.TunnelPort,
-			Protocol:    "tcp",
-			Private:     !machine.PublicSSH,
-			Status:      machineTunnelStatus(machine.Status),
-			Managed:     true,
-			Kind:        "machine-ssh",
-			CreatedAt:   machine.CreatedAt,
-			UpdatedAt:   machine.UpdatedAt,
-		})
 
 		// gopher-agent back-channel — only when the machine has agent
 		// fields allocated (always for new bootstraps; populated on

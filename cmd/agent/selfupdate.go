@@ -93,21 +93,31 @@ func (s *agentServer) handleSelfUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const stagePath = "/tmp/gopher-agent.new"                   // #nosec G101 — not a credential
+	// Stage to a UNIQUE temp file, not a fixed /tmp path. The agent runs as the
+	// `gopher` user, so a fixed gopher-agent.new left here would be un-removable
+	// by a later bootstrap/migrate run under a different user (/tmp is sticky).
+	stage, err := os.CreateTemp("", "gopher-agent-*") // #nosec G101 — not a credential
+	if err != nil {
+		httpJSON(w, http.StatusInternalServerError, map[string]string{"error": "stage temp: " + err.Error()})
+		return
+	}
+	stagePath := stage.Name()
+	_ = stage.Close()
 	if err := os.WriteFile(stagePath, bin, 0o755); err != nil { // #nosec G306 — must be executable
+		_ = os.Remove(stagePath)
 		httpJSON(w, http.StatusInternalServerError, map[string]string{"error": "stage binary: " + err.Error()})
 		return
 	}
 
-	// Detached worker (setsid) installs the staged binary and restarts the unit.
-	// It must outlive this process: `systemctl restart gopher-agent` kills us
-	// mid-call. KillMode=process on the unit (see migrate.sh) keeps the detached
-	// child alive across the stop. The sleep lets the 202 flush back through the
-	// tunnel first. gopher = NOPASSWD: ALL, so sudo -n runs unattended.
+	// Detached worker (setsid) installs the staged binary, restarts the unit, and
+	// removes the staged file. It must outlive this process: `systemctl restart
+	// gopher-agent` kills us mid-call. KillMode=process on the unit (see
+	// migrate.sh) keeps the detached child alive across the stop. The sleep lets
+	// the 202 flush back through the tunnel first. gopher = NOPASSWD: ALL.
 	worker := fmt.Sprintf(
-		"sleep 2; sudo -n install -m 0755 -o root -g root %s /usr/local/bin/gopher-agent && sudo -n systemctl restart gopher-agent",
-		stagePath)
-	cmd := exec.Command("setsid", "sh", "-c", worker) // #nosec G204 — fixed argv; stagePath is a constant
+		"sleep 2; sudo -n install -m 0755 -o root -g root %s /usr/local/bin/gopher-agent && sudo -n systemctl restart gopher-agent; rm -f %s",
+		stagePath, stagePath)
+	cmd := exec.Command("setsid", "sh", "-c", worker) // #nosec G204 — stagePath is an os.CreateTemp name (no shell metachars)
 	if err := cmd.Start(); err != nil {
 		httpJSON(w, http.StatusInternalServerError, map[string]string{"error": "spawn update worker: " + err.Error()})
 		return

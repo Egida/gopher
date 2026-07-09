@@ -108,21 +108,26 @@ case "$ARCH" in
 esac
 
 AGENT_DL_URL="$HOST_URL/static/agents/gopher-agent-$ARCH_TAG"
+# Unique mktemp path, never a fixed /tmp file: /tmp is sticky, so a stale
+# gopher-agent.new from a prior run — or from the agent's self-update, which
+# runs as the `gopher` user — would be un-removable/un-writable here and could
+# even get installed as a stale binary.
+AGENT_TMP=$(mktemp /tmp/gopher-agent.XXXXXX 2>/dev/null || echo "/tmp/gopher-agent.$$.new")
 # Try TLS-verified first; only fall back to no-verify if that fails (e.g. the
 # edge is reached by IP / self-signed cert). Avoids silently MITM-able download
 # of a root-run binary when a valid cert is in fact available.
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$AGENT_DL_URL" -o /tmp/gopher-agent.new \
-    || curl -fsSL --insecure "$AGENT_DL_URL" -o /tmp/gopher-agent.new
+  curl -fsSL "$AGENT_DL_URL" -o "$AGENT_TMP" \
+    || curl -fsSL --insecure "$AGENT_DL_URL" -o "$AGENT_TMP"
 elif command -v wget >/dev/null 2>&1; then
-  wget -q "$AGENT_DL_URL" -O /tmp/gopher-agent.new \
-    || wget -q --no-check-certificate "$AGENT_DL_URL" -O /tmp/gopher-agent.new
+  wget -q "$AGENT_DL_URL" -O "$AGENT_TMP" \
+    || wget -q --no-check-certificate "$AGENT_DL_URL" -O "$AGENT_TMP"
 else
   echo "ERROR: neither curl nor wget is available" >&2
   exit 1
 fi
-install -m 0755 -o root -g root /tmp/gopher-agent.new /usr/local/bin/gopher-agent
-rm -f /tmp/gopher-agent.new
+install -m 0755 -o root -g root "$AGENT_TMP" /usr/local/bin/gopher-agent
+rm -f "$AGENT_TMP"
 
 # ── 4. Agent config (env file consumed by EnvironmentFile=) ─────────────────
 mkdir -p "$AGENT_DIR"

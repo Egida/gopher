@@ -132,25 +132,28 @@ func GenerateRatholeServerConfig(machines []db.Machine, tunnels []db.Tunnel, bin
 		buf.WriteString(block)
 	}
 
-	// Write machine SSH tunnels with markers
+	// Write machine SSH tunnels + agent back-channels with markers. The SSH
+	// service is gated on RatholeSSHToken + TunnelPort (skipped for agent-only
+	// machines), but the agent back-channel is emitted INDEPENDENTLY so an
+	// agent-only machine (SSH disabled → TunnelPort 0) still gets its control
+	// channel. A `continue` here previously skipped both, leaving agent-only
+	// machines with no server-side agent listener (agent unreachable, offline).
 	for _, m := range machines {
-		if m.RatholeSSHToken == "" || m.TunnelPort == 0 {
-			continue
+		if m.RatholeSSHToken != "" && m.TunnelPort != 0 {
+			buf.WriteString(fmt.Sprintf("\n# gopher-machine-start: %s\n", m.ID))
+			buf.WriteString(fmt.Sprintf("[server.services.machine-%s-ssh]\n", m.ID))
+			buf.WriteString(fmt.Sprintf("token = \"%s\"\n", m.RatholeSSHToken))
+			sshBindHost := "127.0.0.1"
+			if m.PublicSSH {
+				sshBindHost = publicHost
+			}
+			buf.WriteString(fmt.Sprintf("bind_addr = \"%s:%d\"\n", sshBindHost, m.TunnelPort))
+			buf.WriteString(fmt.Sprintf("# gopher-machine-end: %s\n", m.ID))
+			managedEntries++
 		}
-		buf.WriteString(fmt.Sprintf("\n# gopher-machine-start: %s\n", m.ID))
-		buf.WriteString(fmt.Sprintf("[server.services.machine-%s-ssh]\n", m.ID))
-		buf.WriteString(fmt.Sprintf("token = \"%s\"\n", m.RatholeSSHToken))
-		sshBindHost := "127.0.0.1"
-		if m.PublicSSH {
-			sshBindHost = publicHost
-		}
-		buf.WriteString(fmt.Sprintf("bind_addr = \"%s:%d\"\n", sshBindHost, m.TunnelPort))
-		buf.WriteString(fmt.Sprintf("# gopher-machine-end: %s\n", m.ID))
-		managedEntries++
 
-		// gopher-agent back-channel (only when the machine has been migrated).
-		// Always bound to 127.0.0.1 — the agent is for the VPS to reach the
-		// client, not for public consumption.
+		// gopher-agent back-channel. Always bound to 127.0.0.1 — the agent is for
+		// the VPS to reach the client, not for public consumption.
 		if hasAgentFields(&m) {
 			buf.WriteString(fmt.Sprintf("\n# gopher-machine-agent-start: %s\n", m.ID))
 			buf.WriteString(fmt.Sprintf("[server.services.machine-%s-agent]\n", m.ID))

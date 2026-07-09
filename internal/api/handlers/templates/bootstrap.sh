@@ -352,26 +352,33 @@ EOF
     # fine. wget is the no-curl fallback; we drop -q so the same diagnostics
     # surface there too.
     AGENT_URL="$HOST_URL/static/agents/gopher-agent-${AGENT_ARCH_TAG}"
-    rm -f /tmp/gopher-agent.new
+    # Download to a UNIQUE mktemp file, never a fixed /tmp path. /tmp is sticky,
+    # so a stale gopher-agent.new left by a prior run — or by the agent's own
+    # self-update, which runs as the `gopher` user — can't be removed or
+    # overwritten by this script (it runs as $SSH_USER), giving "Operation not
+    # permitted" / "Permission denied". Worse, a non-empty leftover would pass
+    # the `-s` check and get installed as a STALE binary. A fresh mktemp file is
+    # owned by us and collision-free.
+    AGENT_TMP=$(mktemp /tmp/gopher-agent.XXXXXX 2>/dev/null || echo "/tmp/gopher-agent.$$.new")
     echo "  Downloading agent: $AGENT_URL"
     if command -v curl >/dev/null 2>&1; then
-      curl -fSL "$AGENT_URL" -o /tmp/gopher-agent.new \
+      curl -fSL "$AGENT_URL" -o "$AGENT_TMP" \
         || { echo "  curl failed; retrying with --insecure (cert validation off)"; \
-             curl -fSL --insecure "$AGENT_URL" -o /tmp/gopher-agent.new || true; }
+             curl -fSL --insecure "$AGENT_URL" -o "$AGENT_TMP" || true; }
     elif command -v wget >/dev/null 2>&1; then
-      wget -nv "$AGENT_URL" -O /tmp/gopher-agent.new \
+      wget -nv "$AGENT_URL" -O "$AGENT_TMP" \
         || { echo "  wget failed; retrying with --no-check-certificate"; \
-             wget -nv --no-check-certificate "$AGENT_URL" -O /tmp/gopher-agent.new || true; }
+             wget -nv --no-check-certificate "$AGENT_URL" -O "$AGENT_TMP" || true; }
     else
       echo "  ERROR: neither curl nor wget is installed — cannot download agent"
     fi
-    if [ ! -s /tmp/gopher-agent.new ]; then
+    if [ ! -s "$AGENT_TMP" ]; then
       echo "  WARN: agent download failed — dashboard's migration tool can finish the install later (token stored at $AGENT_CFG)"
-      rm -f /tmp/gopher-agent.new
+      rm -f "$AGENT_TMP"
     fi
-    if [ -s /tmp/gopher-agent.new ]; then
-      $SUDO install -m 0755 -o root -g root /tmp/gopher-agent.new /usr/local/bin/gopher-agent
-      rm -f /tmp/gopher-agent.new
+    if [ -s "$AGENT_TMP" ]; then
+      $SUDO install -m 0755 -o root -g root "$AGENT_TMP" /usr/local/bin/gopher-agent
+      rm -f "$AGENT_TMP"
 
       # 5. Hand the client.toml to gopher so the agent can write config-push
       # directly without sudo. rathole-client (running as $SSH_USER) keeps

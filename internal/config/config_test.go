@@ -153,6 +153,27 @@ func TestGenerateRatholeServerConfig_Empty(t *testing.T) {
 	}
 }
 
+// An agent-only machine (SSH disabled → TunnelPort 0) must still get its agent
+// back-channel service in server.toml, even with no SSH service. Regression: a
+// `continue` on TunnelPort==0 previously skipped the whole machine, leaving no
+// server-side agent listener → the agent was permanently unreachable/offline.
+func TestGenerateRatholeServerConfig_AgentOnlyMachine(t *testing.T) {
+	machines := []db.Machine{{
+		ID: "m1", TunnelPort: 0, RatholeSSHToken: "",
+		AgentRatholeToken: "atok", AgentLocalPort: 4322, AgentRemotePort: 1029,
+	}}
+	out := GenerateRatholeServerConfig(machines, nil, "", "")
+	if strings.Contains(out, "machine-m1-ssh") {
+		t.Errorf("agent-only machine should have no SSH service:\n%s", out)
+	}
+	if !strings.Contains(out, "[server.services.machine-m1-agent]") {
+		t.Errorf("agent-only machine is missing its agent back-channel service:\n%s", out)
+	}
+	if !strings.Contains(out, `bind_addr = "127.0.0.1:1029"`) {
+		t.Errorf("agent service missing/incorrect bind_addr:\n%s", out)
+	}
+}
+
 func TestGenerateRatholeServerConfig_WithTunnel(t *testing.T) {
 	tunnels := []db.Tunnel{
 		{ID: "t1", RatholePort: 8080, RatholeToken: "tok1"},
