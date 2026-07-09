@@ -422,7 +422,13 @@ fi
 
 echo ""
 echo "=== Bootstrap complete! ==="
-echo "Machine '$MACHINE_NAME' registered as '$SSH_USER'. Tunnel port: $TUNNEL_PORT"
+if [ "$NO_SSH" = "1" ] || [ "$TUNNEL_PORT" = "0" ]; then
+  echo "Machine '$MACHINE_NAME' registered as '$SSH_USER' (agent-only — no SSH tunnel)."
+else
+  echo "Machine '$MACHINE_NAME' registered as '$SSH_USER'. SSH tunnel port: $TUNNEL_PORT"
+fi
 echo "Rathole config: $CLIENT_CFG"
 echo "Service: sudo systemctl status rathole-client"
-echo "The server will SSH back through the tunnel to verify connectivity."
+# The dashboard detects the machine via the agent back-channel + a TCP probe of
+# the tunnel — the server never SSHes back in.
+echo "The dashboard will show this machine as online once its agent connects."

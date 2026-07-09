@@ -358,7 +358,7 @@ export default function MachinesPage() {
           <Server className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <h2 className="text-lg font-semibold text-gray-700 mb-2">No machines registered yet</h2>
           <p className="text-gray-400 text-sm mb-6 max-w-sm mx-auto">
-            Generate a bootstrap token and run the script on any machine to register it automatically via reverse SSH tunnel.
+            Generate a bootstrap token and run the script on any machine to register it automatically via a reverse tunnel.
           </p>
           <button
             onClick={openBootstrapModal}

@@ -757,8 +757,9 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
           <span className="font-semibold text-sm uppercase tracking-wide">Step 3 of 5 — SSH key</span>
         </div>
         <p className="text-sm text-gray-600">
-          Gopher uses an SSH key pair to connect back into bootstrapped machines through their
-          reverse tunnels. Generate a fresh key or bring your own.
+          Control of your machines runs over the agent — this SSH key is optional. It authorizes
+          jumpbox access (<code className="bg-gray-100 px-1 rounded">ssh -J</code> into a machine) and,
+          if you store its private half, an SSH fallback for the server. Generate a fresh key or bring your own.
         </p>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Key name</label>

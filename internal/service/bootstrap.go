@@ -332,6 +332,13 @@ const bootstrapTunnelHealthTimeout = 4 * time.Minute
 // AgentInstalled=false. Saving that struct after awaitAgentReady has already
 // flipped agent_installed=true in the DB would race-revert the flag.
 func (s *BootstrapService) awaitTunnelHealth(machine *db.Machine) {
+	// Agent-only machines have no SSH tunnel port to probe — dialing :0 would
+	// just fail for the whole window and then clobber the status back to
+	// "pending", overwriting a "connected" that awaitAgentReady may have set.
+	// Their readiness signal is the agent back-channel (awaitAgentReady).
+	if machine.TunnelPort == 0 {
+		return
+	}
 	deadline := time.Now().Add(bootstrapTunnelHealthTimeout)
 	addr := net.JoinHostPort(TunnelDialHost(machine), fmt.Sprintf("%d", machine.TunnelPort))
 	for time.Now().Before(deadline) {
