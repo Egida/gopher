@@ -35,6 +35,31 @@ func TestGenerateMachineSSHClientConfig_UsesServerStyleDelimiters(t *testing.T) 
 	}
 }
 
+// A service tunnel on an agent-only machine (no SSH token/tunnel) must merge
+// into client.toml without error. Regression: mergeClientManagedConfig treated
+// the SSH section as mandatory, so pushing config to agent-only machines failed
+// with "missing SSH tunnel token" and the tunnel stayed offline.
+func TestMergeClientManagedConfig_AgentOnlyMachineWithTunnel(t *testing.T) {
+	machine := &db.Machine{
+		ID: "m1", TunnelPort: 0, RatholeSSHToken: "",
+		AgentRatholeToken: "atok", AgentLocalPort: 4322, AgentRemotePort: 1029,
+	}
+	tunnels := []db.Tunnel{{ID: "t1", MachineID: "m1", RatholePort: 1030, LocalPort: 3000, RatholeToken: "ttok"}}
+	out, err := mergeClientManagedConfig("", machine, tunnels, "router.example.com", "")
+	if err != nil {
+		t.Fatalf("agent-only machine + tunnel should merge without error, got: %v", err)
+	}
+	if strings.Contains(out, "machine-m1-ssh") {
+		t.Errorf("agent-only machine should have no SSH service:\n%s", out)
+	}
+	if !strings.Contains(out, "[client.services.machine-m1-agent]") {
+		t.Errorf("missing agent back-channel section:\n%s", out)
+	}
+	if !strings.Contains(out, "[client.services.tunnel-t1]") {
+		t.Errorf("missing service tunnel section:\n%s", out)
+	}
+}
+
 func TestRemoveClientManagedSection_RemovesMarkersAndBlock(t *testing.T) {
 	content := `[client]
 remote_addr = "router.example.com:2333"

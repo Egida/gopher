@@ -153,7 +153,11 @@ if [ -z "$RATHOLE_CONFIG" ] || [ "$RATHOLE_CONFIG" = "null" ]; then
   echo "$RESPONSE"
   exit 1
 fi
-echo "Registered! Tunnel port: $TUNNEL_PORT"
+if [ "$NO_SSH" = "1" ] || [ "$TUNNEL_PORT" = "0" ]; then
+  echo "Registered! (agent-only — no SSH tunnel)"
+else
+  echo "Registered! SSH tunnel port: $TUNNEL_PORT"
+fi
 
 # ── Install VPS SSH key ───────────────────────────────────────────────────────
 # Agent-only machines (--no-ssh) get no server key: the server returns an empty

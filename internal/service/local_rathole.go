@@ -617,7 +617,11 @@ func mergeClientManagedConfig(existing string, machine *db.Machine, tunnels []db
 	}
 
 	machineSection := strings.TrimSpace(buildClientMachineSection(machine))
-	if machineSection == "" {
+	// An SSH-enabled machine must have its SSH section — a missing token there
+	// means an incomplete bootstrap. But an agent-only machine (no SSH tunnel,
+	// TunnelPort 0) legitimately has no SSH section; its agent back-channel +
+	// service tunnels below carry the config. Only error for the former.
+	if machineSection == "" && machine != nil && machine.TunnelPort != 0 {
 		return "", fmt.Errorf("machine is missing SSH tunnel token; bootstrap the machine again")
 	}
 
@@ -634,7 +638,10 @@ func mergeClientManagedConfig(existing string, machine *db.Machine, tunnels []db
 		updated += "\n\n" + block
 	}
 
-	sections := []string{machineSection}
+	sections := []string{}
+	if machineSection != "" {
+		sections = append(sections, machineSection)
+	}
 	if agentSection := strings.TrimSpace(buildClientMachineAgentSection(machine)); agentSection != "" {
 		sections = append(sections, agentSection)
 	}
