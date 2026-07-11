@@ -62,18 +62,18 @@ func (s *LocalSetupService) ReconcileRouterCaddyBlock() {
 	}
 }
 
-func buildTunnelCaddyBlock(subdomain, domain string, ratholePort int, noTLS bool, botProtected bool, bindIP string, tlsSkipVerify bool, private bool) string {
+func buildTunnelCaddyBlock(subdomain, domain string, ratholePort int, noTLS bool, proxied bool, bindIP string, tlsSkipVerify bool, private bool) string {
 	scheme := ""
 	if noTLS {
 		scheme = "http://"
 	}
-	// Bot-protected tunnels route through the Gopher server itself (same port
-	// as the dashboard) so the bot-protection middleware can intercept requests
-	// before they reach rathole. Host header routing distinguishes tunnel
-	// traffic from dashboard traffic.
+	// Gated tunnels (bot protection and/or password auth) route through the
+	// Gopher server itself (same port as the dashboard) so the gate middleware
+	// can intercept requests before they reach rathole. Host header routing
+	// distinguishes tunnel traffic from dashboard traffic.
 	// Public tunnel rathole ports bind to bind_ip (or 0.0.0.0), so Caddy proxies
-	// to bind_ip:ratholePort. Bot-protected tunnels route to Gopher itself which
-	// is on 127.0.0.1, so those always use localhost regardless of bind_ip.
+	// to bind_ip:ratholePort. Gated tunnels route to Gopher itself which is on
+	// 127.0.0.1, so those always use localhost regardless of bind_ip.
 	upstreamPort := ratholePort
 	upstream := "localhost"
 	// Public tunnels bind to bind_ip; private tunnels bind to 127.0.0.1 (only
@@ -82,13 +82,13 @@ func buildTunnelCaddyBlock(subdomain, domain string, ratholePort int, noTLS bool
 	if bindIP != "" && !private {
 		upstream = bindIP
 	}
-	if botProtected {
+	if proxied {
 		upstreamPort = dashboardPort
 		upstream = "localhost"
 	}
 	// TLS skip verify: only meaningful when the upstream is itself HTTPS (noTLS=false,
-	// botProtected=false) and the backend uses a self-signed cert (e.g. Proxmox).
-	if tlsSkipVerify && !noTLS && !botProtected {
+	// not routed through Gopher) and the backend uses a self-signed cert (e.g. Proxmox).
+	if tlsSkipVerify && !noTLS && !proxied {
 		return fmt.Sprintf("%s%s.%s {\n    reverse_proxy %s:%d {\n        transport http {\n            tls_insecure_skip_verify\n        }\n    }\n}\n",
 			scheme, subdomain, domain, upstream, upstreamPort)
 	}

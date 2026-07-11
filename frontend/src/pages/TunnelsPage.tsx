@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Network, ClipboardCopy, ArrowRight, Globe, Lock, Info, AlertTriangle, Pencil, Plus, Search, Trash2, Zap } from 'lucide-react'
+import { Network, ChevronDown, ChevronRight, ClipboardCopy, ArrowRight, Globe, Lock, Info, AlertTriangle, Pencil, Plus, Search, Shield, Trash2, Zap } from 'lucide-react'
 import { tunnelsApi } from '../api/tunnels'
 import { machinesApi } from '../api/machines'
 import { localApi } from '../api/local'
@@ -24,12 +24,18 @@ interface FormState {
   bot_protection_enabled: boolean
   bot_protection_ttl: number    // stored as seconds; 0 = default
   bot_protection_allow_ip: string // newline-delimited in the textarea, JSON on wire
+  auth_enabled: boolean
+  auth_password: string          // write-only; '' = keep existing
+  auth_password_set: boolean     // read-only; whether a password already exists
+  auth_ttl: number               // stored as seconds; 0 = default
+  auth_allow_ip: string          // newline-delimited in the textarea, JSON on wire
 }
 
 const defaultForm: FormState = {
   machine_id: '', name: '', subdomain: '', local_port: 3000, rathole_port: 0,
   transport: 'tcp', no_tls: false, private: false, tls_skip_verify: false,
   bot_protection_enabled: false, bot_protection_ttl: 0, bot_protection_allow_ip: '',
+  auth_enabled: false, auth_password: '', auth_password_set: false, auth_ttl: 0, auth_allow_ip: '',
 }
 
 function cidrToJSON(raw: string): string {
@@ -49,6 +55,8 @@ export default function TunnelsPage() {
   const [form, setForm] = useState<FormState>(defaultForm)
   const [nextPortLoading, setNextPortLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [botAdvancedOpen, setBotAdvancedOpen] = useState(false)   // collapsed by default (defaults are fine)
+  const [authAdvancedOpen, setAuthAdvancedOpen] = useState(false)
 
   const openAddModal = async (machineId?: string) => {
     setNextPortLoading(true)
@@ -60,6 +68,8 @@ export default function TunnelsPage() {
     } finally {
       setNextPortLoading(false)
     }
+    setBotAdvancedOpen(false)
+    setAuthAdvancedOpen(false)
     setModal({ isOpen: true })
   }
 
@@ -78,7 +88,14 @@ export default function TunnelsPage() {
       bot_protection_enabled: t.bot_protection_enabled ?? false,
       bot_protection_ttl: t.bot_protection_ttl ?? 0,
       bot_protection_allow_ip: t.bot_protection_allow_ip ?? '',
+      auth_enabled: t.auth_enabled ?? false,
+      auth_password: '',
+      auth_password_set: t.auth_password_set ?? false,
+      auth_ttl: t.auth_ttl ?? 0,
+      auth_allow_ip: t.auth_allow_ip ?? '',
     })
+    setBotAdvancedOpen(false)
+    setAuthAdvancedOpen(false)
     setModal({ isOpen: true, editTunnel: t })
   }
 
@@ -167,6 +184,9 @@ export default function TunnelsPage() {
         bot_protection_enabled: t.bot_protection_enabled,
         bot_protection_ttl: t.bot_protection_ttl,
         bot_protection_allow_ip: t.bot_protection_allow_ip,
+        auth_enabled: t.auth_enabled,
+        auth_ttl: t.auth_ttl,
+        auth_allow_ip: t.auth_allow_ip,
         tls_skip_verify: t.tls_skip_verify,
       },
     })
@@ -377,6 +397,9 @@ export default function TunnelsPage() {
                                 {t.bot_protection_enabled && (
                                   <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200">Bot Shield</span>
                                 )}
+                                {t.auth_enabled && (
+                                  <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">Password</span>
+                                )}
                                 {t.tls_skip_verify && (
                                   <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-50 text-yellow-700 border border-yellow-200">Self-signed</span>
                                 )}
@@ -390,8 +413,8 @@ export default function TunnelsPage() {
                                 {t.kind !== 'machine-agent' && (
                                 <button
                                   onClick={() => togglePrivate(t)}
-                                  disabled={updateMutation.isPending || t.bot_protection_enabled}
-                                  title={t.bot_protection_enabled ? 'Bot protection requires private — use Edit to change visibility' : (isPrivate ? 'Make public' : 'Make private')}
+                                  disabled={updateMutation.isPending || t.bot_protection_enabled || t.auth_enabled}
+                                  title={(t.bot_protection_enabled || t.auth_enabled) ? 'Gated tunnels require private — use Edit to change visibility' : (isPrivate ? 'Make public' : 'Make private')}
                                   className={`p-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed ${isPrivate
                                     ? 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
                                     : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50 hover:text-gray-600'}`}
@@ -435,9 +458,12 @@ export default function TunnelsPage() {
               )
               const localPortConflict = !isEdit && form.local_port > 0 && form.machine_id !== '' &&
                 tunnels.some(t => t.machine_id === form.machine_id && t.local_port === form.local_port)
+              // Password protection needs a password: either one already exists
+              // (edit) or the operator typed a new one. Block save/create otherwise.
+              const authNeedsPassword = form.auth_enabled && !form.auth_password_set && form.auth_password.trim() === ''
               const canCreate = form.machine_id !== '' && form.name.trim() !== '' &&
-                form.local_port > 0 && form.rathole_port > 0 && !serverPortConflict && !localPortConflict && !createMutation.isPending
-              const canSave = form.name.trim() !== '' && !updateMutation.isPending
+                form.local_port > 0 && form.rathole_port > 0 && !serverPortConflict && !localPortConflict && !authNeedsPassword && !createMutation.isPending
+              const canSave = form.name.trim() !== '' && !authNeedsPassword && !updateMutation.isPending
               return (
             <>
             <div className="p-4 space-y-4">
@@ -557,7 +583,7 @@ export default function TunnelsPage() {
                 <div className="flex gap-2">
                   {([false, true] as const).map(priv => (
                     <button key={String(priv)} type="button"
-                      onClick={() => setForm(f => ({ ...f, private: priv, bot_protection_enabled: priv ? f.bot_protection_enabled : false }))}
+                      onClick={() => setForm(f => ({ ...f, private: priv, bot_protection_enabled: priv ? f.bot_protection_enabled : false, auth_enabled: priv ? f.auth_enabled : false }))}
                       className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors flex items-center gap-1 ${
                         form.private === priv
                           ? priv ? 'bg-slate-700 text-white border-slate-700' : 'bg-green-600 text-white border-green-600'
@@ -629,59 +655,168 @@ export default function TunnelsPage() {
                 </div>
               ) : null}
 
-              {/* Bot Protection — requires subdomain (Host-header routing) */}
+              {/* Access control — bot protection + password auth. Both require a
+                  subdomain (Host-header routing) and coerce the tunnel private. */}
               {routingEnabled && form.transport !== 'udp' && form.subdomain.trim() !== '' && (
                 <div className="border border-gray-200 rounded-lg p-3 space-y-3">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={form.bot_protection_enabled}
-                      onChange={e => setForm(f => ({ ...f, bot_protection_enabled: e.target.checked, private: e.target.checked ? true : f.private }))}
-                      className="rounded"
-                    />
-                    <span className="text-sm font-medium text-gray-700">Bot Protection <span className="bg-orange-100 text-orange-700 text-xs font-semibold px-1.5 py-0.5 rounded">Alpha</span></span>
-                    <span className="text-xs text-gray-400 font-normal">JS proof-of-work challenge for browsers</span>
-                  </label>
-                  <p className="flex items-start gap-1.5 text-xs text-gray-500 pl-6 -mt-1">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    <Shield size={13} className="text-gray-400" /> Access Control
+                  </div>
+                  <p className="flex items-start gap-1.5 text-xs text-gray-500">
                     <Lock size={12} className="mt-0.5 shrink-0 text-gray-400" />
-                    {form.bot_protection_enabled
-                      ? 'Requires a Private tunnel — enabling this set Visibility to Private. A public raw port would let bots skip the challenge.'
-                      : 'Requires a Private tunnel (Caddy-only). Enabling it will switch Visibility to Private, since a public raw port bypasses the challenge.'}
+                    Gates require a Private tunnel (Caddy-only) — enabling one switches Visibility to Private, since a public raw port would bypass it.
                   </p>
-                  {form.bot_protection_enabled && (
-                    <div className="space-y-3 pl-5">
-                      <div>
+
+                  {/* ── Bot Protection ── */}
+                  <div>
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={form.bot_protection_enabled}
+                        onChange={e => setForm(f => ({ ...f, bot_protection_enabled: e.target.checked, private: e.target.checked ? true : f.private }))}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Bot Protection</span>
+                      <span className="bg-amber-100 text-amber-700 text-[11px] font-semibold px-1.5 py-0.5 rounded shrink-0">Alpha</span>
+                      <span className="text-xs text-gray-400 font-normal truncate">JS proof-of-work challenge for browsers</span>
+                    </label>
+                    {form.bot_protection_enabled && (
+                      <div className="ml-6 mt-2 rounded-md border border-gray-100 bg-gray-50/80">
+                        <button
+                          onClick={() => setBotAdvancedOpen(o => !o)}
+                          className="w-full flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium text-gray-500 hover:text-gray-700 text-left"
+                        >
+                          {botAdvancedOpen ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
+                          Advanced
+                          {!botAdvancedOpen && (
+                            <span className="font-normal text-gray-400 truncate">· session TTL, IP allowlist</span>
+                          )}
+                        </button>
+                        {botAdvancedOpen && (
+                          <div className="px-2.5 pb-3 pt-1 space-y-3">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Session TTL (hours) <span className="text-gray-400 font-normal">— 0 = 24 h default</span>
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={form.bot_protection_ttl === 0 ? '' : Math.round(form.bot_protection_ttl / 3600)}
+                                onChange={e => setForm(f => ({
+                                  ...f,
+                                  bot_protection_ttl: e.target.value === '' ? 0 : Number(e.target.value) * 3600,
+                                }))}
+                                placeholder="24"
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                IP Allowlist <span className="text-gray-400 font-normal">— one CIDR or IP per line, bypasses challenge</span>
+                              </label>
+                              <textarea
+                                rows={3}
+                                value={allowIPDisplay(form.bot_protection_allow_ip)}
+                                onChange={e => setForm(f => ({ ...f, bot_protection_allow_ip: cidrToJSON(e.target.value) }))}
+                                placeholder={"192.168.1.0/24\n10.0.0.1"}
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none bg-white"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Password Protection ── */}
+                  <div>
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={form.auth_enabled}
+                        onChange={e => setForm(f => ({ ...f, auth_enabled: e.target.checked, private: e.target.checked ? true : f.private }))}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Password Protection</span>
+                      <span className="bg-amber-100 text-amber-700 text-[11px] font-semibold px-1.5 py-0.5 rounded shrink-0">Alpha</span>
+                      <span className="text-xs text-gray-400 font-normal truncate">shared password login gate</span>
+                    </label>
+                    {form.auth_enabled && (
+                      <div className="ml-6 mt-2">
                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                          Session TTL (hours) <span className="text-gray-400 font-normal">— 0 = 24 h default</span>
+                          Password
+                          {form.auth_password_set && <span className="text-gray-400 font-normal"> — set. Leave blank to keep the current one.</span>}
                         </label>
                         <input
-                          type="number"
-                          min={0}
-                          value={form.bot_protection_ttl === 0 ? '' : Math.round(form.bot_protection_ttl / 3600)}
-                          onChange={e => setForm(f => ({
-                            ...f,
-                            bot_protection_ttl: e.target.value === '' ? 0 : Number(e.target.value) * 3600,
-                          }))}
-                          placeholder="24"
+                          type="password"
+                          autoComplete="new-password"
+                          value={form.auth_password}
+                          onChange={e => setForm(f => ({ ...f, auth_password: e.target.value }))}
+                          placeholder={form.auth_password_set ? '••••••••' : 'Set a password'}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                         />
+                        {authNeedsPassword && (
+                          <p className="text-xs text-red-600 mt-1">A password is required to enable this.</p>
+                        )}
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                          IP Allowlist <span className="text-gray-400 font-normal">— one CIDR or IP per line, bypasses challenge</span>
-                        </label>
-                        <textarea
-                          rows={3}
-                          value={allowIPDisplay(form.bot_protection_allow_ip)}
-                          onChange={e => setForm(f => ({ ...f, bot_protection_allow_ip: cidrToJSON(e.target.value) }))}
-                          placeholder={"192.168.1.0/24\n10.0.0.1"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
-                        />
+                    )}
+                    {form.auth_enabled && (
+                      <div className="ml-6 mt-2 rounded-md border border-gray-100 bg-gray-50/80">
+                        <button
+                          onClick={() => setAuthAdvancedOpen(o => !o)}
+                          className="w-full flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium text-gray-500 hover:text-gray-700 text-left"
+                        >
+                          {authAdvancedOpen ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
+                          Advanced
+                          {!authAdvancedOpen && (
+                            <span className="font-normal text-gray-400 truncate">· session TTL, IP allowlist</span>
+                          )}
+                        </button>
+                        {authAdvancedOpen && (
+                          <div className="px-2.5 pb-3 pt-1 space-y-3">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Session TTL (hours) <span className="text-gray-400 font-normal">— 0 = 24 h default</span>
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={form.auth_ttl === 0 ? '' : Math.round(form.auth_ttl / 3600)}
+                                onChange={e => setForm(f => ({
+                                  ...f,
+                                  auth_ttl: e.target.value === '' ? 0 : Number(e.target.value) * 3600,
+                                }))}
+                                placeholder="24"
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">
+                                IP Allowlist <span className="text-gray-400 font-normal">— one CIDR or IP per line, bypasses login</span>
+                              </label>
+                              <textarea
+                                rows={3}
+                                value={allowIPDisplay(form.auth_allow_ip)}
+                                onChange={e => setForm(f => ({ ...f, auth_allow_ip: cidrToJSON(e.target.value) }))}
+                                placeholder={"192.168.1.0/24\n10.0.0.1"}
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none bg-white"
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded px-2 py-1.5">
-                        API clients (Accept: application/json) receive 403. WebSocket connections are allowed after the cookie is set. Does not protect against L3/L4 attacks.
-                      </p>
-                    </div>
+                    )}
+                  </div>
+
+                  {/* Unified caveat — shown once, covers whichever gates are on */}
+                  {(form.bot_protection_enabled || form.auth_enabled) && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      Gates run at the HTTP layer. API clients (Accept: application/json) are rejected
+                      ({form.bot_protection_enabled && '403 for the bot challenge'}
+                      {form.bot_protection_enabled && form.auth_enabled && ', '}
+                      {form.auth_enabled && '401 for the password gate'}).
+                      WebSocket connections pass once the session cookie is set. Does not protect against L3/L4 attacks.
+                    </p>
                   )}
                 </div>
               )}
@@ -701,6 +836,10 @@ export default function TunnelsPage() {
                       bot_protection_enabled: form.bot_protection_enabled,
                       bot_protection_ttl: form.bot_protection_ttl,
                       bot_protection_allow_ip: form.bot_protection_allow_ip,
+                      auth_enabled: form.auth_enabled,
+                      auth_password: form.auth_password,
+                      auth_ttl: form.auth_ttl,
+                      auth_allow_ip: form.auth_allow_ip,
                     },
                   }, { onSuccess: () => { qc.invalidateQueries({ queryKey: ['tunnels'] }); setModal({ isOpen: false }); toast.success('Tunnel updated!') }, onError: (e: Error) => toast.error(e.message) })}
                   disabled={!canSave}

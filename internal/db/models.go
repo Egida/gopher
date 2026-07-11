@@ -115,6 +115,15 @@ type Tunnel struct {
 	BotProtectionEnabled bool   `json:"bot_protection_enabled"`
 	BotProtectionTTL     int    `json:"bot_protection_ttl"`      // session TTL in seconds; 0 = default (86400)
 	BotProtectionAllowIP string `json:"bot_protection_allow_ip"` // JSON array of CIDR/IP strings
+	// Password auth — opt-in per tunnel, HTTP subdomain tunnels only, requires a
+	// private tunnel (same guards as bot protection). A separate, distinct gate
+	// from the gopher dashboard login. AuthPasswordHash is bcrypt and is never
+	// serialized; AuthPasswordSet is the computed flag the UI reads instead.
+	AuthEnabled      bool   `json:"auth_enabled"`
+	AuthPasswordHash string `json:"-" gorm:"column:auth_password_hash"`
+	AuthPasswordSet  bool   `json:"auth_password_set" gorm:"-"`
+	AuthTTL          int    `json:"auth_ttl"`      // session TTL in seconds; 0 = default (86400)
+	AuthAllowIP      string `json:"auth_allow_ip"` // JSON array of CIDR/IP strings that bypass the gate
 	// TLSSkipVerify disables upstream TLS certificate verification in Caddy.
 	// Use for backends with self-signed certs (e.g. Proxmox, some NAS devices).
 	TLSSkipVerify bool      `json:"tls_skip_verify"`
@@ -123,6 +132,13 @@ type Tunnel struct {
 	Kind          string    `json:"kind,omitempty" gorm:"-"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// AfterFind computes AuthPasswordSet on every DB read so the UI can tell whether
+// a password is configured without ever seeing the hash.
+func (t *Tunnel) AfterFind(*gorm.DB) error {
+	t.AuthPasswordSet = t.AuthPasswordHash != ""
+	return nil
 }
 
 type BootstrapToken struct {
