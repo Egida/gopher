@@ -220,8 +220,8 @@ func (s *LocalSetupService) MigrateRatholeNoise() error {
 	pushed, failed := 0, 0
 	for i := range machines {
 		m := &machines[i]
-		if m.TunnelPort == 0 || m.RatholeSSHToken == "" {
-			continue // unbootstrapped row, nothing to push
+		if m.TunnelPort == 0 && m.AgentRemotePort == 0 {
+			continue // genuinely unbootstrapped; agent-only machines (no SSH token/tunnel) still get pushed via the agent
 		}
 		machineTunnels, terr := db.GetTunnelsByMachine(m.ID)
 		if terr != nil {

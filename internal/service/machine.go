@@ -117,7 +117,11 @@ func (s *MachineService) delete(id string, fromClient bool) (*DeleteResult, erro
 	// external API with no tunnel) have no client-side install to clean —
 	// skip the remote teardown entirely instead of reporting it as a
 	// failure. ClientCleanupOK stays true and the handler returns 204.
-	if s.local != nil && !fromClient && machine.TunnelPort > 0 {
+	// Clean up the remote client whenever there's one to reach — via a tunnel OR
+	// an agent. Agent-only machines have TunnelPort 0 but a valid agent channel,
+	// so gating on TunnelPort alone silently skipped their teardown, leaving
+	// rathole + the agent running on the box.
+	if s.local != nil && !fromClient && (machine.TunnelPort > 0 || machine.AgentRemotePort > 0) {
 		if machine.AgentInstalled && machine.AgentRemotePort > 0 {
 			result.ClientCleanupPath = "agent"
 		} else {

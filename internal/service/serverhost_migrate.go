@@ -55,8 +55,8 @@ func (s *LocalSetupService) MigrateServerHostToRouter() error {
 	pushed, failed := 0, 0
 	for i := range machines {
 		m := &machines[i]
-		if m.TunnelPort == 0 {
-			continue // unbootstrapped row, nothing to push
+		if m.TunnelPort == 0 && m.AgentRemotePort == 0 {
+			continue // genuinely unbootstrapped; agent-only machines still get pushed via the agent
 		}
 		machineTunnels, terr := db.GetTunnelsByMachine(m.ID)
 		if terr != nil {
