@@ -96,6 +96,10 @@ func TestExtractUserCaddyConfig_StripsAllGopherBoilerplate(t *testing.T) {
 		caddyCustomBeginMark + "\n" +
 		"# Gopher managed Caddyfile\n" + // stray, stacked
 		"# Gopher managed Caddyfile\n" +
+		"# Global options (uncomment and set email to enable HTTPS):\n" +
+		"# {\n" +
+		"#     email you@example.com\n" +
+		"# }\n" +
 		"# Everything below this line will NOT be overwritten.\n" +
 		"# Add your own Caddy site blocks here.\n" +
 		"import /etc/caddy/conf.d/*.caddy\n" +
@@ -107,6 +111,9 @@ func TestExtractUserCaddyConfig_StripsAllGopherBoilerplate(t *testing.T) {
 	if strings.Contains(got, "# Gopher managed Caddyfile") {
 		t.Fatalf("stray managed header leaked into user config:\n%s", got)
 	}
+	if strings.Contains(got, "# Global options") || strings.Contains(got, "email you@example.com") {
+		t.Fatalf("global-options boilerplate leaked into user config:\n%s", got)
+	}
 	if strings.Contains(got, "Everything below this line") || strings.Contains(got, "Add your own Caddy") {
 		t.Fatalf("boilerplate comments leaked:\n%s", got)
 	}
@@ -115,6 +122,55 @@ func TestExtractUserCaddyConfig_StripsAllGopherBoilerplate(t *testing.T) {
 	}
 	if !strings.Contains(got, "gopherden.org {") || !strings.Contains(got, "file_server") {
 		t.Fatalf("user's site block was dropped:\n%s", got)
+	}
+}
+
+// Regression for the beta.15→16 upgrade leftover: an old uninstall reset the
+// Caddyfile but left stacked managed headers + global-options comment blocks
+// in it; the next install absorbed that whole file as "user content". The
+// reconcile path must self-heal — strip every copy of gopher's boilerplate
+// while keeping the operator's real site blocks.
+func TestBuildManagedCaddyfile_SelfHealsAbsorbedBoilerplate(t *testing.T) {
+	// Marker-less file shaped like the real-world leftover: two stacked
+	// header+global-options copies, then the operator's sites.
+	headerCopy := "# Gopher managed Caddyfile\n" +
+		"# Global options (uncomment and set email to enable HTTPS):\n" +
+		"# {\n" +
+		"#     email you@example.com\n" +
+		"# }\n\n"
+	existing := headerCopy + headerCopy +
+		"gopherden.org {\n\troot * /var/www/gopherden\n\tfile_server\n}\n"
+
+	out := buildManagedCaddyfile(existing, "")
+
+	// Exactly one of each: the freshly-emitted top-of-file copy — none inside
+	// the custom section.
+	if got := strings.Count(out, "# Gopher managed Caddyfile"); got != 1 {
+		t.Fatalf("expected exactly 1 managed header, got %d:\n%s", got, out)
+	}
+	if got := strings.Count(out, "# Global options (uncomment and set email to enable HTTPS):"); got != 1 {
+		t.Fatalf("expected exactly 1 global-options block, got %d:\n%s", got, out)
+	}
+	if !strings.Contains(out, "gopherden.org {") {
+		t.Fatalf("user's site block was dropped:\n%s", out)
+	}
+	// Idempotence: re-reconciling the healed output must not grow it.
+	again := buildManagedCaddyfile(out, "")
+	if again != out {
+		t.Fatalf("reconcile not idempotent:\n--- first ---\n%s\n--- second ---\n%s", out, again)
+	}
+}
+
+// The commented global-options block is stripped only as a contiguous
+// sequence — a lone "# {" or "# }" in user content must survive.
+func TestStripManagedCaddyComments_KeepsLoneBraceComments(t *testing.T) {
+	body := "# {\n" +
+		"# my own commented-out block\n" +
+		"# }\n" +
+		"example.com {\n\treverse_proxy localhost:8080\n}\n"
+	got := stripManagedCaddyComments(body)
+	if !strings.Contains(got, "# {") || !strings.Contains(got, "# }") {
+		t.Fatalf("lone commented braces were eaten:\n%s", got)
 	}
 }
 
