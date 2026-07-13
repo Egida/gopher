@@ -49,6 +49,43 @@ func resetCaddyManagedConfig() error {
 	return nil
 }
 
+// detectCustomConfig reports whether the operator has any config of their own
+// under /etc/gopher: Caddy site blocks in the Caddyfile's custom section, or
+// rathole services in server.toml's custom block. Drives the uninstall prompt —
+// when everything is Gopher-managed there is nothing to preserve and nothing
+// worth asking about.
+func detectCustomConfig() (customCaddy, customRathole bool) {
+	if data, err := os.ReadFile(paths.CaddyfilePath); err == nil {
+		customCaddy = strings.TrimSpace(service.ExtractUserCaddyConfig(string(data))) != ""
+	}
+	if data, err := os.ReadFile(paths.RatholeConfig); err == nil {
+		customRathole = ratholeCustomBlockHasContent(string(data))
+	}
+	return customCaddy, customRathole
+}
+
+// ratholeCustomBlockHasContent reports whether server.toml's custom-config
+// marker block contains anything beyond comments and blank lines.
+func ratholeCustomBlockHasContent(content string) bool {
+	const begin = "# ===== BEGIN CUSTOM CONFIGURATION ====="
+	const end = "# ===== END CUSTOM CONFIGURATION ====="
+	i := strings.Index(content, begin)
+	if i == -1 {
+		return false
+	}
+	body := content[i+len(begin):]
+	if j := strings.Index(body, end); j != -1 {
+		body = body[:j]
+	}
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(line)
+		if t != "" && !strings.HasPrefix(t, "#") {
+			return true
+		}
+	}
+	return false
+}
+
 func removeCaddyCompletely() error {
 	// caddy is bundled into the gopher binary and supervised as a child — there's
 	// no apt package or caddy.service to remove. Drop its config tree; certs in

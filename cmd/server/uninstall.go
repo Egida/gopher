@@ -61,16 +61,34 @@ func runUninstall(args []string) error {
 	// always goes with gopher; the only decision left is their *config* under
 	// /etc/gopher.
 	//
-	// Default keeps the operator's custom config blocks and strips only the
-	// Gopher-managed entries (each file is backed up to *.gopher-backup first), so
-	// a hand-rolled Caddy site or rathole service survives for a future standalone
-	// setup. Opting in removes the whole /etc/gopher config tree.
+	// Gopher-managed entries are removed no matter what — the only decision is
+	// whether the operator's own config (custom Caddy site blocks, custom
+	// rathole services) survives. So the prompt is phrased around THEIR
+	// content, and only asked when such content actually exists: an
+	// all-Gopher /etc/gopher has nothing worth preserving and is removed
+	// without a question. Default keeps their config (each file is backed up
+	// to *.gopher-backup first) so a hand-rolled setup survives standalone.
 	removeConfig := *skipPrompts
 	if !*skipPrompts {
-		var err error
-		removeConfig, err = promptYesNo("Remove Gopher's Caddy + rathole config under /etc/gopher entirely? Default keeps your custom config blocks (Gopher-managed entries are stripped either way). [y/N]: ")
-		if err != nil {
-			return fmt.Errorf("failed reading config removal confirmation: %w", err)
+		customCaddy, customRathole := detectCustomConfig()
+		if customCaddy || customRathole {
+			var found []string
+			if customCaddy {
+				found = append(found, "Caddy site blocks")
+			}
+			if customRathole {
+				found = append(found, "rathole services")
+			}
+			var err error
+			removeConfig, err = promptYesNo(fmt.Sprintf(
+				"Found your own %s under /etc/gopher. Delete them too? Default keeps them; Gopher-managed config is removed either way. [y/N]: ",
+				strings.Join(found, " and ")))
+			if err != nil {
+				return fmt.Errorf("failed reading config removal confirmation: %w", err)
+			}
+		} else {
+			fmt.Println("No custom config found under /etc/gopher — removing Gopher-managed config.")
+			removeConfig = true
 		}
 	}
 
