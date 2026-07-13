@@ -123,6 +123,8 @@ export const localApi = {
     client.put('/local/bind-ip', { bind_ip: bindIP }).then(r => r.data),
   setupFail2ban: () =>
     client.post('/local/setup-fail2ban').then(r => r.data),
+  skipFail2ban: () =>
+    client.post('/local/skip-fail2ban').then(r => r.data),
   activity: () =>
     client.get<{ data: ActivityEvent[] }>('/local/activity').then(r => r.data.data),
 }

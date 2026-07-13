@@ -105,6 +105,17 @@ func (s *LocalSetupService) SetupFail2ban() error {
 }
 
 
+// SkipFail2ban marks the wizard's fail2ban step as deliberately declined.
+// A separate flag from Fail2banSetupDone: setup-done is ANDed with the binary
+// actually being present (see Status), so faking it true here would report
+// false again on the next status fetch and loop the wizard back to the step.
+func (s *LocalSetupService) SkipFail2ban() error {
+	return db.MutateSettings(func(settings *db.AppSettings) error {
+		settings.Fail2banSkipped = true
+		return nil
+	})
+}
+
 func (s *LocalSetupService) doInstall(domain string, logWriter io.Writer) error {
 	fmt.Fprintln(logWriter, "=== Installing Local Services ===")
 

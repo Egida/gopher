@@ -114,6 +114,7 @@ func NewRouter(
 				r.Get("/activity", localH.Activity)
 				r.Post("/reconcile", localH.Reconcile)
 				r.Post("/setup-fail2ban", localH.SetupFail2ban)
+				r.Post("/skip-fail2ban", localH.SkipFail2ban)
 				r.Put("/server-ports", localH.SetServerPorts)
 				r.Put("/bind-ip", localH.SetBindIP)
 				r.Post("/dismiss-custom-services-warning", localH.DismissCustomServicesWarning)

@@ -929,6 +929,18 @@ function SSHKeyStep({ onDone }: { onDone: () => void }) {
 
 function Fail2banStep({ onDone }: { onDone: () => void }) {
   const [showLogs, setShowLogs] = useState(false)
+  const [skipping, setSkipping] = useState(false)
+
+  const skip = async () => {
+    setSkipping(true)
+    try {
+      await localApi.skipFail2ban()
+      onDone()
+    } catch {
+      toast.error('Failed to skip — try again')
+      setSkipping(false)
+    }
+  }
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
@@ -955,6 +967,16 @@ function Fail2banStep({ onDone }: { onDone: () => void }) {
       >
         Install fail2ban
       </button>
+      <button
+        onClick={skip}
+        disabled={skipping}
+        className="w-full text-gray-500 hover:text-gray-700 py-1 text-sm font-medium transition-colors disabled:opacity-50 -mt-2"
+      >
+        {skipping ? 'Skipping…' : 'Skip for now'}
+      </button>
+      <p className="text-xs text-gray-400 text-center -mt-4">
+        You can install it later from the Security page.
+      </p>
 
       <DeployLogModal
         isOpen={showLogs}

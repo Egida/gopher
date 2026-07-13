@@ -147,9 +147,14 @@ func (s *LocalSetupService) Status() (*LocalServiceStatus, error) {
 		DashboardPort:        dashboardPort,
 		OSUser:               osUser,
 		JumpboxUser:          s.JumpboxUser(),
-		Fail2banSetupDone:    settings.Fail2banSetupDone,
-		BindIP:               settings.BindIP,
-		HostIPs:              detectHostIPs(),
+		// "Step satisfied" = installed-and-actually-present, OR deliberately
+		// skipped. The AND guards against a manual `apt remove fail2ban`
+		// leaving the DB flag stale forever (no in-dashboard uninstall flow
+		// exists to clear it); the skip flag lets an operator decline the
+		// wizard step without that same AND looping them back into it.
+		Fail2banSetupDone: (settings.Fail2banSetupDone && isCommandAvailable("fail2ban-client")) || settings.Fail2banSkipped,
+		BindIP:            settings.BindIP,
+		HostIPs:           detectHostIPs(),
 	}
 	if key, kerr := db.GetDefaultSSHKey(); kerr == nil {
 		status.SSHPublicKey = key.PublicKey

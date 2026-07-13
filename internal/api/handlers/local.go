@@ -132,6 +132,17 @@ func (h *LocalHandler) SetupFail2ban(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, map[string]string{"message": "fail2ban setup started"})
 }
 
+// POST /api/local/skip-fail2ban — operator declines the wizard's fail2ban
+// step. Records the choice so the wizard advances; fail2ban stays installable
+// later from the Security page.
+func (h *LocalHandler) SkipFail2ban(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.SkipFail2ban(); err != nil {
+		response.InternalError(w, err.Error())
+		return
+	}
+	response.Success(w, map[string]string{"message": "fail2ban step skipped"})
+}
+
 // POST /api/local/reconcile — rebuild server.toml AND every tunnel's
 // Caddy file from DB. The latter recovers from any state where a tunnel
 // row in the DB has no matching Caddy file on disk (e.g. file was deleted
