@@ -92,6 +92,30 @@ func TestAuthService_ValidateSession(t *testing.T) {
 	}
 }
 
+// Regression for the setup-wizard 401: step 2's install ends with a
+// `systemctl restart gopher`, and in-memory sessions died with it — the first
+// authed call on step 3 bounced the operator to the login page. Sessions are
+// persisted now; a fresh AuthService over the same DB (= a restarted process)
+// must still accept the token.
+func TestAuthService_SessionSurvivesRestart(t *testing.T) {
+	initTestDB(t)
+	svc := NewAuthService()
+	_ = svc.Setup("password123")
+
+	result, _ := svc.Login("password123", "127.0.0.1")
+	token := result.Token
+
+	restarted := NewAuthService()
+	if !restarted.ValidateSession(token) {
+		t.Error("session should survive a service restart (new AuthService, same DB)")
+	}
+
+	restarted.Logout(token)
+	if svc.ValidateSession(token) {
+		t.Error("logout must revoke the session across instances")
+	}
+}
+
 func TestAuthService_ValidateSession_InvalidToken(t *testing.T) {
 	initTestDB(t)
 	svc := NewAuthService()

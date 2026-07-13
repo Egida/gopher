@@ -196,6 +196,37 @@ func DeleteMachine(id string) error {
 	return err
 }
 
+// Dashboard Session Repository — see the DashboardSession model comment for
+// why these are persisted (self-restarts must not log the operator out).
+
+func CreateDashboardSession(tokenHash string, expiresAt time.Time) error {
+	// Opportunistic sweep: expired rows are dead weight and this is the only
+	// low-frequency write path, so no background reaper is needed.
+	_ = DB.Where("expires_at < ?", time.Now()).Delete(&DashboardSession{}).Error
+	return DB.Create(&DashboardSession{TokenHash: tokenHash, ExpiresAt: expiresAt}).Error
+}
+
+// GetDashboardSession returns nil (no error) when the session doesn't exist.
+func GetDashboardSession(tokenHash string) (*DashboardSession, error) {
+	var s DashboardSession
+	if err := DB.First(&s, "token_hash = ?", tokenHash).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+func TouchDashboardSession(tokenHash string, expiresAt time.Time) error {
+	return DB.Model(&DashboardSession{}).Where("token_hash = ?", tokenHash).
+		Update("expires_at", expiresAt).Error
+}
+
+func DeleteDashboardSession(tokenHash string) error {
+	return DB.Delete(&DashboardSession{}, "token_hash = ?", tokenHash).Error
+}
+
 // Tunnel Repository
 
 func GetTunnels() ([]Tunnel, error) {

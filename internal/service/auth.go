@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -43,13 +44,23 @@ func authEventSeverity(event string) string {
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
-
-type session struct {
-	expiresAt time.Time
-}
+//
+// Sessions are persisted (hashed) in the DB, NOT in memory: gopher restarts
+// itself during normal operation — the post-install supervisor kick and
+// self-updates — and in-memory sessions logged the operator out mid-setup
+// (step 3 of the wizard 401'd because step 2's install restarted the service).
+// Only the short-lived pending-TOTP tokens stay in memory; losing one across
+// a restart just means re-entering the password.
 
 type pendingTOTPEntry struct {
 	expiresAt time.Time
+}
+
+// hashSessionToken derives the DB key from a bearer token. Sessions are
+// stored hashed so a leaked/backed-up DB doesn't yield usable tokens.
+func hashSessionToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 // LoginResult is returned by Login.
@@ -61,14 +72,12 @@ type LoginResult struct {
 
 type AuthService struct {
 	mu          sync.RWMutex
-	sessions    map[string]session
 	pendingTOTP map[string]pendingTOTPEntry
 	rl          *loginRateLimiter
 }
 
 func NewAuthService() *AuthService {
 	return &AuthService{
-		sessions:    make(map[string]session),
 		pendingTOTP: make(map[string]pendingTOTPEntry),
 		rl:          newLoginRateLimiter(),
 	}
@@ -304,23 +313,27 @@ func (s *AuthService) SensitiveOpRequirement() (string, error) {
 }
 
 func (s *AuthService) Logout(token string) {
-	s.mu.Lock()
-	delete(s.sessions, token)
-	s.mu.Unlock()
+	_ = db.DeleteDashboardSession(hashSessionToken(token))
 }
 
 func (s *AuthService) ValidateSession(token string) bool {
 	if token == "" {
 		return false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, ok := s.sessions[token]
-	if !ok || time.Now().After(sess.expiresAt) {
-		delete(s.sessions, token)
+	hash := hashSessionToken(token)
+	sess, err := db.GetDashboardSession(hash)
+	if err != nil || sess == nil {
 		return false
 	}
-	s.sessions[token] = session{expiresAt: time.Now().Add(sessionDuration)}
+	if time.Now().After(sess.ExpiresAt) {
+		_ = db.DeleteDashboardSession(hash)
+		return false
+	}
+	// Sliding expiry, but only write when at least an hour has been consumed —
+	// the dashboard polls every 15s and a DB write per request is pointless.
+	if remaining := time.Until(sess.ExpiresAt); remaining < sessionDuration-time.Hour {
+		_ = db.TouchDashboardSession(hash, time.Now().Add(sessionDuration))
+	}
 	return true
 }
 
@@ -574,9 +587,9 @@ func (s *AuthService) createSession() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to generate session: %w", err)
 	}
-	s.mu.Lock()
-	s.sessions[token] = session{expiresAt: time.Now().Add(sessionDuration)}
-	s.mu.Unlock()
+	if err := db.CreateDashboardSession(hashSessionToken(token), time.Now().Add(sessionDuration)); err != nil {
+		return "", fmt.Errorf("failed to persist session: %w", err)
+	}
 	return token, nil
 }
 

@@ -16,6 +16,17 @@ func randomID() string {
 	return hex.EncodeToString(b)
 }
 
+// DashboardSession is a persisted operator login session. Stored hashed
+// (SHA-256 of the bearer token) so a leaked DB doesn't yield usable tokens.
+// Persisted rather than in-memory because gopher restarts itself as part of
+// normal operation — the post-install supervisor kick and self-updates — and
+// in-memory sessions logged the operator out mid-setup-wizard.
+type DashboardSession struct {
+	TokenHash string    `json:"-" gorm:"primaryKey"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // BotSession records a browser that has passed the PoW challenge for a tunnel.
 type BotSession struct {
 	ID        string    `json:"id" gorm:"primaryKey"`

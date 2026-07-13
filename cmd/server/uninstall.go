@@ -148,6 +148,40 @@ func runUninstall(args []string) error {
 		}
 	}
 
+	// The fail2ban PACKAGE is a system-level side effect: the wizard installs it
+	// when absent, but post-uninstall it still protects the rest of the box
+	// (distro defaults ban ssh brute-force). So it's a prompt, defaulting to
+	// keep — and deliberately NOT included in --skip-prompts' "remove
+	// everything", since silently stripping ssh protection in an unattended run
+	// is a worse failure mode than leaving a useful package behind.
+	f2bSummary := ""
+	if _, err := exec.LookPath("fail2ban-client"); err == nil && !*skipPrompts {
+		removeF2b, err := promptYesNo("Remove the fail2ban package? Gopher may have installed it, but it also protects sshd on this box. Default keeps it. [y/N]: ")
+		if err != nil {
+			return fmt.Errorf("failed reading fail2ban removal confirmation: %w", err)
+		}
+		if removeF2b {
+			if systemctlPath != "" {
+				runCommandBestEffort(systemctlPath, "disable", "--now", "fail2ban")
+			}
+			if aptPath, lookErr := exec.LookPath("apt-get"); lookErr == nil {
+				runCommandBestEffort(aptPath, "purge", "-y", "-qq", "fail2ban")
+				f2bSummary = "fail2ban package removed"
+			} else if dnfPath, lookErr := exec.LookPath("dnf"); lookErr == nil {
+				runCommandBestEffort(dnfPath, "remove", "-y", "-q", "fail2ban")
+				f2bSummary = "fail2ban package removed"
+			} else if yumPath, lookErr := exec.LookPath("yum"); lookErr == nil {
+				runCommandBestEffort(yumPath, "remove", "-y", "-q", "fail2ban")
+				f2bSummary = "fail2ban package removed"
+			} else {
+				fmt.Println("  no known package manager found — remove fail2ban manually")
+				f2bSummary = "fail2ban kept: no known package manager — remove manually"
+			}
+		} else {
+			f2bSummary = "fail2ban package kept (Gopher jail + filter removed)"
+		}
+	}
+
 	targetBinary := filepath.Join(cfg.installDir, "gopher")
 	if _, err := removeFileIfExists(targetBinary); err != nil {
 		return fmt.Errorf("failed to remove installed binary: %w", err)
@@ -226,6 +260,9 @@ func runUninstall(args []string) error {
 	fmt.Printf("Binary removed: %s\n", targetBinary)
 	fmt.Println(dataSummary)
 	fmt.Println(configSummary)
+	if f2bSummary != "" {
+		fmt.Println(f2bSummary)
+	}
 	fmt.Println(userSummary)
 	return nil
 }
