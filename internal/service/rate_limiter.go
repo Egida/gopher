@@ -13,14 +13,27 @@ const (
 )
 
 type loginRateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string][]time.Time
+	mu       sync.Mutex
+	buckets  map[string][]time.Time
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func newLoginRateLimiter() *loginRateLimiter {
-	rl := &loginRateLimiter{buckets: make(map[string][]time.Time)}
+	rl := &loginRateLimiter{
+		buckets: make(map[string][]time.Time),
+		stopCh:  make(chan struct{}),
+	}
 	go rl.cleanup()
 	return rl
+}
+
+// Stop halts the background cleanup goroutine. Idempotent. The production
+// singletons (AuthService, BootstrapService) live for the whole process so
+// they never call this; it exists so tests and any future short-lived limiter
+// don't leak the ticker goroutine.
+func (rl *loginRateLimiter) Stop() {
+	rl.stopOnce.Do(func() { close(rl.stopCh) })
 }
 
 // record adds an attempt for the given IP and reports whether it is allowed.
@@ -65,23 +78,28 @@ func (rl *loginRateLimiter) Reset(ip string) {
 func (rl *loginRateLimiter) cleanup() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		cutoff := time.Now().Add(-loginRateWindow)
-		rl.mu.Lock()
-		for ip, times := range rl.buckets {
-			var valid []time.Time
-			for _, t := range times {
-				if t.After(cutoff) {
-					valid = append(valid, t)
+	for {
+		select {
+		case <-rl.stopCh:
+			return
+		case <-ticker.C:
+			cutoff := time.Now().Add(-loginRateWindow)
+			rl.mu.Lock()
+			for ip, times := range rl.buckets {
+				var valid []time.Time
+				for _, t := range times {
+					if t.After(cutoff) {
+						valid = append(valid, t)
+					}
+				}
+				if len(valid) == 0 {
+					delete(rl.buckets, ip)
+				} else {
+					rl.buckets[ip] = valid
 				}
 			}
-			if len(valid) == 0 {
-				delete(rl.buckets, ip)
-			} else {
-				rl.buckets[ip] = valid
-			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
 

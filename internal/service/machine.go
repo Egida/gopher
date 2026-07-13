@@ -182,8 +182,9 @@ func (s *MachineService) Deploy(id string) error {
 		return err
 	}
 
-	go s.deploy.DeployClient(machine) //nolint:errcheck
-	return nil
+	// DeployClient takes the hub op-lock and runs the sync in its own
+	// goroutine, returning ErrOpInProgress if another streamed op is active.
+	return s.deploy.DeployClient(machine)
 }
 
 // RecoverMachine drives the server-side recovery flow: tries the agent push

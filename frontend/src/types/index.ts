@@ -105,6 +105,11 @@ export interface Tunnel {
   bot_protection_enabled?: boolean
   bot_protection_ttl?: number      // seconds; 0 = default (86400)
   bot_protection_allow_ip?: string // JSON array of CIDR/IP strings
+  auth_enabled?: boolean
+  auth_password_set?: boolean      // read-only: whether a password hash exists
+  auth_password?: string           // write-only: set/change the password ('' = keep)
+  auth_ttl?: number                // seconds; 0 = default (86400)
+  auth_allow_ip?: string           // JSON array of CIDR/IP strings
   tls_skip_verify?: boolean        // skip upstream TLS cert verification (e.g. Proxmox)
   status: string
   managed?: boolean

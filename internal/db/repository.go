@@ -56,7 +56,11 @@ func GetMachine(id string) (*Machine, error) {
 }
 
 func CreateMachine(machine *Machine) error {
-	return DB.Create(machine).Error
+	err := DB.Create(machine).Error
+	if err == nil {
+		notifyStatusChange("machine", machine.ID, "", machine.Status)
+	}
+	return err
 }
 
 // GetMachineByAgentToken resolves a machine by its per-machine agent bearer
@@ -94,6 +98,7 @@ func SetMachineConfigPushPending(id string, pending bool) error {
 }
 
 func SetMachineStatus(id, status string, lastSeen *time.Time) error {
+	old := currentMachineStatus(id)
 	updates := map[string]any{
 		"status":     status,
 		"updated_at": time.Now(),
@@ -108,7 +113,11 @@ func SetMachineStatus(id, status string, lastSeen *time.Time) error {
 		}
 		updates["connected_since"] = connectedSinceExpr(when)
 	}
-	return DB.Model(&Machine{}).Where("id = ?", id).Updates(updates).Error
+	err := DB.Model(&Machine{}).Where("id = ?", id).Updates(updates).Error
+	if err == nil {
+		notifyStatusChange("machine", id, old, status)
+	}
+	return err
 }
 
 // connectedSinceExpr stamps connected_since on the up-transition (or the first
@@ -129,6 +138,7 @@ func connectedSinceExpr(when time.Time) any {
 // "offline" so the tunnels list / network map don't keep claiming the
 // machine can serve traffic.
 func SetMachineAgentDegraded(id, version string, when time.Time) error {
+	old := currentMachineStatus(id)
 	updates := map[string]any{
 		"agent_installed":     true,
 		"agent_version":       version,
@@ -137,7 +147,11 @@ func SetMachineAgentDegraded(id, version string, when time.Time) error {
 		"status":              "offline",
 		"updated_at":          when,
 	}
-	return DB.Model(&Machine{}).Where("id = ?", id).Updates(updates).Error
+	err := DB.Model(&Machine{}).Where("id = ?", id).Updates(updates).Error
+	if err == nil {
+		notifyStatusChange("machine", id, old, "offline")
+	}
+	return err
 }
 
 // SetMachineAgentSeen marks the machine as having a healthy, reachable agent.
@@ -146,6 +160,7 @@ func SetMachineAgentDegraded(id, version string, when time.Time) error {
 // Status is also set to "connected" since reaching the agent proves end-to-end
 // connectivity through the rathole back-channel.
 func SetMachineAgentSeen(id, version string, when time.Time) error {
+	old := currentMachineStatus(id)
 	updates := map[string]any{
 		"agent_installed":     true,
 		"agent_version":       version,
@@ -156,7 +171,11 @@ func SetMachineAgentSeen(id, version string, when time.Time) error {
 		"connected_since":     connectedSinceExpr(when),
 		"updated_at":          when,
 	}
-	return DB.Model(&Machine{}).Where("id = ?", id).Updates(updates).Error
+	err := DB.Model(&Machine{}).Where("id = ?", id).Updates(updates).Error
+	if err == nil {
+		notifyStatusChange("machine", id, old, "connected")
+	}
+	return err
 }
 
 // SetMachineAgentOutdated flags (or clears) a machine whose agent needs an
@@ -170,7 +189,11 @@ func SetMachineAgentOutdated(id string, outdated bool) error {
 }
 
 func DeleteMachine(id string) error {
-	return DB.Delete(&Machine{}, "id = ?", id).Error
+	err := DB.Delete(&Machine{}, "id = ?", id).Error
+	if err == nil {
+		notifyStatusChange("machine", id, "", "deleted")
+	}
+	return err
 }
 
 // Tunnel Repository
@@ -203,7 +226,11 @@ func GetTunnel(id string) (*Tunnel, error) {
 }
 
 func CreateTunnel(tunnel *Tunnel) error {
-	return DB.Create(tunnel).Error
+	err := DB.Create(tunnel).Error
+	if err == nil {
+		notifyStatusChange("tunnel", tunnel.ID, "", tunnel.Status)
+	}
+	return err
 }
 
 func UpdateTunnel(tunnel *Tunnel) error {
@@ -216,14 +243,23 @@ func UpdateTunnel(tunnel *Tunnel) error {
 // stale full-record DB.Save 30 seconds later. Same pattern as
 // SetMachineStatus / SetMachineAgentSeen.
 func SetTunnelStatus(id, status string) error {
-	return DB.Model(&Tunnel{}).Where("id = ?", id).Updates(map[string]any{
+	old := currentTunnelStatus(id)
+	err := DB.Model(&Tunnel{}).Where("id = ?", id).Updates(map[string]any{
 		"status":     status,
 		"updated_at": time.Now(),
 	}).Error
+	if err == nil {
+		notifyStatusChange("tunnel", id, old, status)
+	}
+	return err
 }
 
 func DeleteTunnel(id string) error {
-	return DB.Delete(&Tunnel{}, "id = ?", id).Error
+	err := DB.Delete(&Tunnel{}, "id = ?", id).Error
+	if err == nil {
+		notifyStatusChange("tunnel", id, "", "deleted")
+	}
+	return err
 }
 
 // allUsedPorts returns every port currently assigned across service tunnels,

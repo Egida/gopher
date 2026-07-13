@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/smalex-z/gopher/internal/api/dto"
 	"github.com/smalex-z/gopher/internal/config"
 	"github.com/smalex-z/gopher/internal/db"
@@ -209,9 +211,26 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 
 	// Bot protection requires a subdomain (needs Host-header routing through proxy).
 	botProtection := req.BotProtectionEnabled && req.Subdomain != "" && transport != "udp"
-	// Bot protection is only meaningful if the raw port is closed — otherwise it's
-	// trivially bypassed by hitting the rathole port directly. Enforce private.
-	private := req.Private || botProtection
+	// Password auth has the same requirement (routes through the proxy on a
+	// subdomain) and is a separate, distinct gate from the dashboard login.
+	authProtection := req.AuthEnabled && req.Subdomain != "" && transport != "udp"
+	// Bot protection and auth are only enforceable if the raw port is closed —
+	// otherwise they're trivially bypassed by hitting the rathole port directly.
+	// Both imply (and enforce) private.
+	private := req.Private || botProtection || authProtection
+
+	// A newly-enabled password gate must be given a password.
+	authHash := ""
+	if authProtection {
+		if req.AuthPassword == "" {
+			return nil, &apperrors.ValidationError{Field: "auth_password", Message: "a password is required to enable password protection"}
+		}
+		h, herr := bcrypt.GenerateFromPassword([]byte(req.AuthPassword), bcrypt.DefaultCost)
+		if herr != nil {
+			return nil, herr
+		}
+		authHash = string(h)
+	}
 
 	tunnel := &db.Tunnel{
 		ID:                   shortToken(),
@@ -228,6 +247,10 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 		BotProtectionEnabled: botProtection,
 		BotProtectionTTL:     req.BotProtectionTTL,
 		BotProtectionAllowIP: req.BotProtectionAllowIP,
+		AuthEnabled:          authProtection,
+		AuthPasswordHash:     authHash,
+		AuthTTL:              req.AuthTTL,
+		AuthAllowIP:          req.AuthAllowIP,
 		TLSSkipVerify:        req.TLSSkipVerify && req.Subdomain != "" && !req.NoTLS && transport != "udp",
 		Status:               "inactive",
 		CreatedAt:            time.Now(),
@@ -317,6 +340,7 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 
 	oldPrivate := tunnel.Private
 	oldBotProtection := tunnel.BotProtectionEnabled
+	oldAuthEnabled := tunnel.AuthEnabled
 	oldTLSSkipVerify := tunnel.TLSSkipVerify
 	oldLocalPort := tunnel.LocalPort
 	tunnel.Name = req.Name
@@ -335,6 +359,24 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 	}
 	tunnel.BotProtectionTTL = req.BotProtectionTTL
 	tunnel.BotProtectionAllowIP = req.BotProtectionAllowIP
+	// Password auth — same subdomain/TCP guards + private coercion as bot
+	// protection. An empty AuthPassword keeps the existing hash; enabling with no
+	// password ever set is rejected.
+	tunnel.AuthEnabled = req.AuthEnabled && tunnel.Subdomain != "" && tunnel.Transport != "udp"
+	if tunnel.AuthEnabled {
+		tunnel.Private = true
+		if req.AuthPassword != "" {
+			h, herr := bcrypt.GenerateFromPassword([]byte(req.AuthPassword), bcrypt.DefaultCost)
+			if herr != nil {
+				return nil, herr
+			}
+			tunnel.AuthPasswordHash = string(h)
+		} else if tunnel.AuthPasswordHash == "" {
+			return nil, &apperrors.ValidationError{Field: "auth_password", Message: "a password is required to enable password protection"}
+		}
+	}
+	tunnel.AuthTTL = req.AuthTTL
+	tunnel.AuthAllowIP = req.AuthAllowIP
 	tunnel.TLSSkipVerify = req.TLSSkipVerify && tunnel.Subdomain != "" && !tunnel.NoTLS && tunnel.Transport != "udp"
 	tunnel.UpdatedAt = time.Now()
 
@@ -399,7 +441,7 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 
 	// If bot protection or TLS skip verify toggled (and the subdomain branch
 	// above didn't already rewrite), refresh the Caddy block.
-	if oldSubdomain == tunnel.Subdomain && (oldBotProtection != tunnel.BotProtectionEnabled || oldTLSSkipVerify != tunnel.TLSSkipVerify) && tunnel.Subdomain != "" && s.local != nil {
+	if oldSubdomain == tunnel.Subdomain && (oldBotProtection != tunnel.BotProtectionEnabled || oldAuthEnabled != tunnel.AuthEnabled || oldTLSSkipVerify != tunnel.TLSSkipVerify) && tunnel.Subdomain != "" && s.local != nil {
 		if err := s.local.WriteServiceTunnelCaddy(tunnel); err != nil {
 			log.Printf("tunnel update: refresh caddy block for %s: %v", tunnel.ID, err)
 		}

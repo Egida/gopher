@@ -726,32 +726,43 @@ export default function MachinesPage() {
                   </div>
                 )}
 
-                {/* SSH access — the header row is BOTH an expander and the enable toggle */}
+                {/* SSH access — one toggle row; options live in a nested Advanced sub-panel */}
                 <div className="border border-gray-200 rounded-lg">
-                  <div className="flex items-center gap-2 px-3 py-2.5">
-                    <button
-                      onClick={() => setSSHSectionOpen(o => !o)}
-                      className="flex items-center gap-2 text-sm text-gray-700 flex-1 text-left min-w-0"
-                    >
-                      {sshSectionOpen ? <ChevronDown size={15} className="shrink-0" /> : <ChevronRight size={15} className="shrink-0" />}
-                      <span className="font-medium">SSH access</span>
-                      {sshEnabledInput && (
-                        <span className="text-xs text-gray-400 truncate">· {publicSSHInput ? 'Public' : 'Jumpbox-gated'}</span>
-                      )}
-                    </button>
-                    <label className="flex items-center cursor-pointer shrink-0" title={sshEnabledInput ? 'SSH enabled — uncheck for agent-only' : 'Agent-only (SSH off)'}>
-                      <input
-                        type="checkbox"
-                        checked={sshEnabledInput}
-                        onChange={e => setSSHEnabledInput(e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    </label>
-                  </div>
-                  {sshSectionOpen && (
-                    <div className="px-3 pb-3 pt-1 space-y-3 border-t border-gray-100">
-                      {sshEnabledInput ? (
-                        <>
+                  <label className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer" title={sshEnabledInput ? 'SSH enabled — uncheck for agent-only' : 'Agent-only (SSH off)'}>
+                    <input
+                      type="checkbox"
+                      checked={sshEnabledInput}
+                      onChange={e => setSSHEnabledInput(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                    />
+                    <span className="text-sm font-medium text-gray-700">SSH access</span>
+                    <span className={`ml-auto text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ${
+                      !sshEnabledInput
+                        ? 'bg-gray-100 text-gray-500'
+                        : publicSSHInput
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                          : 'bg-blue-50 text-blue-600 border border-blue-100'
+                    }`}>
+                      {sshEnabledInput ? (publicSSHInput ? 'Public' : 'Jumpbox-gated') : 'Agent-only'}
+                    </span>
+                  </label>
+                  {!sshEnabledInput && (
+                    <p className="px-3 pb-3 text-xs text-gray-400">Agent-only machine: no SSH tunnel or <code className="bg-gray-100 px-1 rounded">authorized_keys</code> entry — control runs entirely over the agent.</p>
+                  )}
+                  {sshEnabledInput && (
+                    <div className="mx-3 mb-3 rounded-md border border-gray-100 bg-gray-50/80">
+                      <button
+                        onClick={() => setSSHSectionOpen(o => !o)}
+                        className="w-full flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium text-gray-500 hover:text-gray-700 text-left"
+                      >
+                        {sshSectionOpen ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
+                        Advanced
+                        {!sshSectionOpen && (
+                          <span className="font-normal text-gray-400 truncate">· key, privacy, port</span>
+                        )}
+                      </button>
+                      {sshSectionOpen && (
+                        <div className="px-2.5 pb-3 pt-1 space-y-3">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                               SSH Key <span className="text-gray-400 font-normal">(optional)</span>
@@ -793,12 +804,10 @@ export default function MachinesPage() {
                               placeholder="Auto-assign"
                               min={1}
                               max={65535}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                             />
                           </div>
-                        </>
-                      ) : (
-                        <p className="text-xs text-gray-400">Agent-only machine: no SSH tunnel or <code className="bg-gray-100 px-1 rounded">authorized_keys</code> entry — control runs entirely over the agent.</p>
+                        </div>
                       )}
                     </div>
                   )}

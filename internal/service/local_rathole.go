@@ -184,7 +184,7 @@ func (s *LocalSetupService) AddServiceTunnel(tunnel *db.Tunnel, machine *db.Mach
 			return fmt.Errorf("failed to write router Caddy file: %w", err)
 		}
 		managedPath := managedTunnelCaddyPath(tunnel.ID)
-		block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, settings.BindIP, tunnel.TLSSkipVerify, tunnel.Private)
+		block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled || tunnel.AuthEnabled, settings.BindIP, tunnel.TLSSkipVerify, tunnel.Private)
 		if err := writeLocalFile(managedPath, block); err != nil {
 			return fmt.Errorf("failed to write tunnel Caddy file %s: %w", managedPath, err)
 		}
@@ -418,7 +418,7 @@ func (s *LocalSetupService) WriteServiceTunnelCaddy(tunnel *db.Tunnel) error {
 		return nil
 	}
 	managedPath := managedTunnelCaddyPath(tunnel.ID)
-	block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled, settings.BindIP, tunnel.TLSSkipVerify, tunnel.Private)
+	block := buildTunnelCaddyBlock(tunnel.Subdomain, settings.Domain, tunnel.RatholePort, tunnel.NoTLS, tunnel.BotProtectionEnabled || tunnel.AuthEnabled, settings.BindIP, tunnel.TLSSkipVerify, tunnel.Private)
 	if err := writeLocalFile(managedPath, block); err != nil {
 		return fmt.Errorf("write caddy block for %s: %w", tunnel.ID, err)
 	}

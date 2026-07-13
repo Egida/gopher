@@ -81,6 +81,11 @@ func runServer(args []string) {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
+	// Status push channel — wired before the health/monitor writers start so
+	// no transition can fire while the hook is nil.
+	statusHub := service.NewStatusHub()
+	db.OnStatusChange = statusHub.Publish
+
 	deploySvc := service.NewDeployService()
 	localSvc := service.NewLocalSetupService(deploySvc.Hub)
 	vpsSvc := service.NewVPSService()
@@ -209,7 +214,7 @@ func runServer(args []string) {
 		}
 	}()
 
-	router := api.NewRouter(vpsSvc, machineSvc, tunnelSvc, deploySvc, bootstrapSvc, authSvc, localSvc, updateSvc, secSvc, backupSvc, agentInstaller, healthSvc)
+	router := api.NewRouter(vpsSvc, machineSvc, tunnelSvc, deploySvc, bootstrapSvc, authSvc, localSvc, updateSvc, secSvc, backupSvc, agentInstaller, healthSvc, statusHub)
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", router)

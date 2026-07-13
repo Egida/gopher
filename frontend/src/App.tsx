@@ -17,6 +17,7 @@ import LogsPage from './pages/LogsPage'
 import SetupPage from './pages/SetupPage'
 import LoginPage from './pages/LoginPage'
 import { AuthProvider, useAuth } from './lib/auth'
+import { useStatusEvents } from './lib/statusEvents'
 import { toast } from './lib/toast'
 import client from './api/client'
 import { updateApi, type UpdateInfo } from './api/update'
@@ -80,6 +81,10 @@ function AppShell() {
     if (!isAuthenticated) return
     updateApi.check().then(setUpdateInfo).catch(() => {})
   }, [isAuthenticated])
+
+  // Live badge updates — must be called before the early returns below
+  // (hooks run unconditionally); the enabled flag gates the socket itself.
+  useStatusEvents(isAuthenticated && localSetupDone)
 
   const handleUpdate = useCallback(async () => {
     setIsUpdating(true)

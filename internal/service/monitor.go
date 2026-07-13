@@ -15,6 +15,11 @@ type MonitorService struct {
 	stopOnce  sync.Once
 	stopCh    chan struct{}
 	doneCh    chan struct{}
+	// probes tracks the per-machine / per-tunnel fan-out goroutines spawned by
+	// each check cycle. Stop() waits on it so shutdown can't return while a
+	// status-writer is still mid-flight — closing doneCh only proves the run
+	// loop exited, not that the writers it launched have drained.
+	probes sync.WaitGroup
 }
 
 func NewMonitorService() *MonitorService {
@@ -33,23 +38,30 @@ func (s *MonitorService) Start() {
 	})
 }
 
-// Stop signals the polling goroutine to exit and waits up to 5s for it to
-// drain. Idempotent — extra calls return immediately. Wired to the SIGTERM
-// handler in cmd/server/main.go so a `systemctl stop gopher` doesn't kill
-// the goroutine mid-probe and leave a half-written status row.
+// Stop signals the polling goroutine to exit and waits for it — plus the
+// fan-out probe goroutines it spawned — to drain. Idempotent; extra calls
+// return immediately. Wired to the SIGTERM handler in cmd/server/main.go so a
+// `systemctl stop gopher` doesn't kill a goroutine mid-probe and leave a
+// half-written status row. The budget exceeds a single probe's worst case
+// (~10s: 5s dial + 5s banner read) so the drain can actually complete;
+// systemd's SIGTERM grace is 90s, so there's ample headroom.
 func (s *MonitorService) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
 	})
 	select {
 	case <-s.doneCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(12 * time.Second):
 		log.Printf("monitor: stop timeout — goroutine may still be in-flight")
 	}
 }
 
+// run drives the poll loop. It only closes doneCh after the final check
+// cycle's fan-out goroutines have drained, so Stop()'s wait covers the
+// status-writers — not just the loop.
 func (s *MonitorService) run() {
 	defer close(s.doneCh)
+	defer s.probes.Wait()
 	// Check immediately on start, then every 30 seconds.
 	s.checkAll()
 	ticker := time.NewTicker(30 * time.Second)
@@ -77,7 +89,11 @@ func (s *MonitorService) checkMachines() {
 	}
 	for _, machine := range machines {
 		m := machine
-		go goSafe("monitor.checkMachine", func() { s.checkMachine(m) })
+		s.probes.Add(1)
+		go goSafe("monitor.checkMachine", func() {
+			defer s.probes.Done()
+			s.checkMachine(m)
+		})
 	}
 }
 
@@ -144,7 +160,11 @@ func (s *MonitorService) checkTunnels() {
 	}
 	for _, t := range tunnels {
 		tunnel := t
-		go goSafe("monitor.checkTunnel", func() { s.checkTunnel(tunnel) })
+		s.probes.Add(1)
+		go goSafe("monitor.checkTunnel", func() {
+			defer s.probes.Done()
+			s.checkTunnel(tunnel)
+		})
 	}
 }
 

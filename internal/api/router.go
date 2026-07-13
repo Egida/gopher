@@ -22,6 +22,7 @@ func NewRouter(
 	backupSvc *service.BackupService,
 	agentInstaller *service.AgentInstaller,
 	healthSvc *service.HealthService,
+	statusHub *service.StatusHub,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -44,6 +45,7 @@ func NewRouter(
 	backupH := handlers.NewBackupHandler(backupSvc)
 	agentH := handlers.NewAgentHandler(agentInstaller, healthSvc)
 	eventsH := handlers.NewEventsHandler()
+	statusWSH := handlers.NewStatusWSHandler(statusHub)
 
 	// Public: bootstrap script download and machine self-registration
 	r.Get("/static/bootstrap.sh", bootstrapH.ServeScript)
@@ -79,6 +81,10 @@ func NewRouter(
 			r.Post("/auth/logout", authH.Logout)
 
 			r.Get("/events", eventsH.List)
+			// Push channel for status badges — machine/tunnel status
+			// transitions stream here so the dashboard doesn't wait out
+			// its poll interval.
+			r.Get("/status/ws", statusWSH.WebSocket)
 
 			r.Route("/security", func(r chi.Router) {
 				r.Get("/stale-tokens", securityH.StaleTokenAttempts)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -143,6 +144,10 @@ func (h *MachineHandler) SelfDelete(w http.ResponseWriter, r *http.Request) {
 func (h *MachineHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.Deploy(id); err != nil {
+		if errors.Is(err, service.ErrOpInProgress) {
+			response.Error(w, http.StatusConflict, err.Error())
+			return
+		}
 		response.InternalError(w, err.Error())
 		return
 	}

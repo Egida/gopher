@@ -11,19 +11,24 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/smalex-z/gopher/internal/db"
 )
 
 const (
-	cookieName        = "gopher_bot_pass"
+	botCookieName     = "gopher_bot_pass"
+	authCookieName    = "gopher_auth"
 	defaultSessionTTL = 24 * time.Hour
 	// powDifficulty is the number of leading zero hex chars required in the
 	// SHA-256 hash. This is a PoC-grade speed bump (Alpha): its real job is to
@@ -32,12 +37,23 @@ const (
 	// (16 bits ≈ sub-second even with the current async-digest solver) keeps it
 	// from being an 8s wall. A proper solver + adaptive difficulty is v0.2.0 work.
 	powDifficulty = 4
+	// Password-gate brute-force throttle, per source IP.
+	authMaxFails   = 8
+	authFailWindow = 5 * time.Minute
 )
 
 // Middleware holds the ephemeral HMAC signing key. Create once at startup with
 // NewMiddleware, then call Wrap to get the http.Handler.
 type Middleware struct {
 	hmacKey []byte
+
+	authMu   sync.Mutex
+	authFail map[string]*authFailState // per-IP failed password attempts
+}
+
+type authFailState struct {
+	count int
+	reset time.Time
 }
 
 // NewMiddleware generates a fresh HMAC key and returns the middleware.
@@ -47,68 +63,84 @@ func NewMiddleware() (*Middleware, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("proxy: generate HMAC key: %w", err)
 	}
-	return &Middleware{hmacKey: key}, nil
+	return &Middleware{hmacKey: key, authFail: make(map[string]*authFailState)}, nil
 }
 
-// Wrap returns an http.Handler that intercepts bot-protected tunnel requests
-// and passes everything else to next.
+// Wrap returns an http.Handler that intercepts requests to gated tunnels — bot
+// protection and/or password auth — and passes everything else to next. A gated
+// request must clear every enabled gate before it reaches the origin.
 func (m *Middleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tunnel := resolveTunnel(r.Host)
-		if tunnel == nil || !tunnel.BotProtectionEnabled {
+		if tunnel == nil || (!tunnel.BotProtectionEnabled && !tunnel.AuthEnabled) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// PoW solution submission — same domain, path /bot-verify.
-		if r.URL.Path == "/bot-verify" {
+		// Gate post-backs.
+		if r.URL.Path == "/bot-verify" && tunnel.BotProtectionEnabled {
 			m.handleVerify(w, r, tunnel)
 			return
 		}
+		if r.URL.Path == "/auth-verify" && tunnel.AuthEnabled {
+			m.handleAuthVerify(w, r, tunnel)
+			return
+		}
 
-		m.handleProxy(w, r, tunnel)
+		// Bot gate first (cheap, filters non-JS clients), then the password gate.
+		if tunnel.BotProtectionEnabled && !m.gatePassed(r, botCookieName, "bot", tunnel.ID, tunnel.BotProtectionAllowIP, "") {
+			serveBotGate(w, r, tunnel)
+			return
+		}
+		if tunnel.AuthEnabled && !m.gatePassed(r, authCookieName, "auth", tunnel.ID, tunnel.AuthAllowIP, tunnel.AuthPasswordHash) {
+			serveAuthGate(w, r)
+			return
+		}
+		m.forward(w, r, tunnel)
 	})
+}
+
+// gatePassed reports whether the request already satisfies a gate — its source
+// IP is allowlisted, or it carries a valid, purpose-scoped cookie.
+func (m *Middleware) gatePassed(r *http.Request, cookie, purpose, tunnelID, allowIP, bind string) bool {
+	if isIPAllowed(allowIP, clientIP(r)) {
+		return true
+	}
+	return m.hasValidCookie(r, cookie, purpose, tunnelID, bind)
 }
 
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
-func (m *Middleware) handleProxy(w http.ResponseWriter, r *http.Request, tunnel *db.Tunnel) {
-	ip := clientIP(r)
-
-	// IP allowlist: bypass everything.
-	if isIPAllowed(tunnel.BotProtectionAllowIP, ip) {
-		m.forward(w, r, tunnel)
-		return
-	}
-
-	// Valid cookie: forward unconditionally — this covers both normal page
-	// requests and browser-side fetch/XHR calls (which send Accept:
-	// application/json). Once the browser has passed the challenge, all of
-	// its requests work regardless of Accept header.
-	if m.hasCookie(r, tunnel) {
-		m.forward(w, r, tunnel)
-		return
-	}
-
-	// No valid cookie from here on. Decide how to respond based on client type.
-
-	// API/non-browser clients can't complete an HTML challenge; return JSON.
+// serveBotGate responds to a request that hasn't cleared bot protection.
+func serveBotGate(w http.ResponseWriter, r *http.Request, tunnel *db.Tunnel) {
 	if isAPIClient(r) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, `{"success":false,"error":"bot protection active — complete browser verification first"}`)
 		return
 	}
-
-	// WebSocket upgrades can't display a challenge page either.
 	if isWebSocketUpgrade(r) {
 		http.Error(w, "403 Forbidden — complete browser verification first", http.StatusForbidden)
 		return
 	}
-
 	serveChallenge(w, tunnel.ID, powDifficulty)
+}
+
+// serveAuthGate responds to a request that hasn't cleared the password gate.
+func serveAuthGate(w http.ResponseWriter, r *http.Request) {
+	if isAPIClient(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"success":false,"error":"authentication required"}`)
+		return
+	}
+	if isWebSocketUpgrade(r) {
+		http.Error(w, "401 Unauthorized — authenticate first", http.StatusUnauthorized)
+		return
+	}
+	serveLogin(w, http.StatusUnauthorized, "", r.URL.RequestURI())
 }
 
 func (m *Middleware) handleVerify(w http.ResponseWriter, r *http.Request, tunnel *db.Tunnel) {
@@ -120,47 +152,83 @@ func (m *Middleware) handleVerify(w http.ResponseWriter, r *http.Request, tunnel
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-
-	nonce := r.FormValue("nonce")
-	solution := r.FormValue("solution")
-	redirect := r.FormValue("redirect")
-
-	if !checkPoW(nonce, solution, powDifficulty) {
+	if !checkPoW(r.FormValue("nonce"), r.FormValue("solution"), powDifficulty) {
 		http.Error(w, "invalid proof of work", http.StatusForbidden)
 		return
 	}
-
 	ttl := ttlForTunnel(tunnel)
-	token := m.issueToken(tunnel.ID, ttl)
+	m.setSessionCookie(w, botCookieName, "bot", tunnel.ID, "", ttl)
+	recordSession(tunnel.ID, r, ttl)
+	http.Redirect(w, r, safeRedirect(r.FormValue("redirect"), "/bot-verify"), http.StatusSeeOther)
+}
+
+func (m *Middleware) handleAuthVerify(w http.ResponseWriter, r *http.Request, tunnel *db.Tunnel) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	redirect := r.FormValue("redirect")
+	ip := clientIP(r)
+
+	if m.authThrottled(ip) {
+		serveLogin(w, http.StatusTooManyRequests, "Too many attempts. Wait a minute and try again.", redirect)
+		return
+	}
+	// Constant-time-ish bcrypt compare. An unset hash never matches.
+	if tunnel.AuthPasswordHash == "" ||
+		bcrypt.CompareHashAndPassword([]byte(tunnel.AuthPasswordHash), []byte(r.FormValue("password"))) != nil {
+		m.recordAuthFail(ip)
+		serveLogin(w, http.StatusUnauthorized, "Incorrect password.", redirect)
+		return
+	}
+	m.clearAuthFail(ip)
+
+	ttl := authTTLForTunnel(tunnel)
+	m.setSessionCookie(w, authCookieName, "auth", tunnel.ID, tunnel.AuthPasswordHash, ttl)
+	recordSession(tunnel.ID, r, ttl)
+	http.Redirect(w, r, safeRedirect(redirect, "/auth-verify"), http.StatusSeeOther)
+}
+
+// setSessionCookie issues a purpose-scoped HMAC token and sets it as a cookie.
+func (m *Middleware) setSessionCookie(w http.ResponseWriter, name, purpose, tunnelID, bind string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    token,
+		Name:     name,
+		Value:    m.issueToken(purpose, tunnelID, bind, ttl),
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(ttl.Seconds()),
 	})
+}
 
+// recordSession writes an audit row for an issued gate session (best-effort).
+func recordSession(tunnelID string, r *http.Request, ttl time.Duration) {
 	go func() {
 		_ = db.CreateBotSession(&db.BotSession{
 			ID:        randomHex(8),
-			TunnelID:  tunnel.ID,
+			TunnelID:  tunnelID,
 			IP:        clientIP(r),
 			UserAgent: r.UserAgent(),
 			IssuedAt:  time.Now(),
 			ExpiresAt: time.Now().Add(ttl),
 		})
 	}()
+}
 
-	// Only allow same-site, path-relative redirects. Reject absolute URLs
-	// (https://evil.com), protocol-relative (//evil.com), and back-references —
-	// otherwise the post-challenge redirect is an open redirect on the tunnel's
-	// subdomain.
-	if redirect == "" || redirect == "/bot-verify" || !strings.HasPrefix(redirect, "/") || strings.HasPrefix(redirect, "//") || strings.Contains(redirect, "..") {
-		redirect = "/"
+// safeRedirect restricts the post-gate redirect to same-site, path-relative
+// targets. Rejects absolute URLs (https://evil.com), protocol-relative
+// (//evil.com), and back-references — otherwise it's an open redirect on the
+// tunnel's subdomain.
+func safeRedirect(redirect, verifyPath string) string {
+	if redirect == "" || redirect == verifyPath || !strings.HasPrefix(redirect, "/") || strings.HasPrefix(redirect, "//") || strings.Contains(redirect, "..") {
+		return "/"
 	}
-	http.Redirect(w, r, redirect, http.StatusSeeOther)
+	return redirect
 }
 
 // ---------------------------------------------------------------------------
@@ -201,46 +269,50 @@ func (m *Middleware) forward(w http.ResponseWriter, r *http.Request, tunnel *db.
 // Cookie helpers
 // ---------------------------------------------------------------------------
 
-func (m *Middleware) issueToken(tunnelID string, ttl time.Duration) string {
+// issueToken mints a purpose-scoped signed token: purpose:tunnelID:exp:hmac.
+// The purpose ("bot" / "auth") prevents a cookie from one gate satisfying
+// another even though both use the same key and tunnel ID.
+//
+// bind is an extra secret folded into the HMAC input but never written to the
+// token — for the auth gate it's the current password hash, so rotating the
+// password changes the signature and invalidates every outstanding cookie.
+// Pass "" for gates that don't bind (bot).
+func (m *Middleware) issueToken(purpose, tunnelID, bind string, ttl time.Duration) string {
 	if ttl <= 0 {
 		ttl = defaultSessionTTL
 	}
 	exp := time.Now().Add(ttl).Unix()
-	payload := fmt.Sprintf("%s:%d", tunnelID, exp)
-	return payload + ":" + hmacSign(m.hmacKey, payload)
+	payload := fmt.Sprintf("%s:%s:%d", purpose, tunnelID, exp)
+	return payload + ":" + hmacSign(m.hmacKey, payload+"|"+bind)
 }
 
-func (m *Middleware) validateToken(token, tunnelID string) bool {
+func (m *Middleware) validateToken(token, purpose, tunnelID, bind string) bool {
 	lastColon := strings.LastIndex(token, ":")
 	if lastColon < 0 {
 		return false
 	}
 	mac := token[lastColon+1:]
 	payload := token[:lastColon]
-	if !hmac.Equal([]byte(mac), []byte(hmacSign(m.hmacKey, payload))) {
+	if !hmac.Equal([]byte(mac), []byte(hmacSign(m.hmacKey, payload+"|"+bind))) {
 		return false
 	}
-	secondColon := strings.LastIndex(payload, ":")
-	if secondColon < 0 {
-		return false
-	}
-	tid, expStr := payload[:secondColon], payload[secondColon+1:]
-	if tid != tunnelID {
+	parts := strings.SplitN(payload, ":", 3) // purpose : tunnelID : exp
+	if len(parts) != 3 || parts[0] != purpose || parts[1] != tunnelID {
 		return false
 	}
 	var exp int64
-	if _, err := fmt.Sscan(expStr, &exp); err != nil {
+	if _, err := fmt.Sscan(parts[2], &exp); err != nil {
 		return false
 	}
 	return time.Now().Unix() < exp
 }
 
-func (m *Middleware) hasCookie(r *http.Request, tunnel *db.Tunnel) bool {
+func (m *Middleware) hasValidCookie(r *http.Request, cookieName, purpose, tunnelID, bind string) bool {
 	c, err := r.Cookie(cookieName)
 	if err != nil {
 		return false
 	}
-	return m.validateToken(c.Value, tunnel.ID)
+	return m.validateToken(c.Value, purpose, tunnelID, bind)
 }
 
 func hmacSign(key []byte, data string) string {
@@ -348,6 +420,44 @@ func ttlForTunnel(t *db.Tunnel) time.Duration {
 	return defaultSessionTTL
 }
 
+func authTTLForTunnel(t *db.Tunnel) time.Duration {
+	if t.AuthTTL > 0 {
+		return time.Duration(t.AuthTTL) * time.Second
+	}
+	return defaultSessionTTL
+}
+
+// ---------------------------------------------------------------------------
+// Password-gate brute-force throttle (per source IP, sliding window)
+// ---------------------------------------------------------------------------
+
+func (m *Middleware) authThrottled(ip string) bool {
+	m.authMu.Lock()
+	defer m.authMu.Unlock()
+	st := m.authFail[ip]
+	if st == nil || time.Now().After(st.reset) {
+		return false
+	}
+	return st.count >= authMaxFails
+}
+
+func (m *Middleware) recordAuthFail(ip string) {
+	m.authMu.Lock()
+	defer m.authMu.Unlock()
+	st := m.authFail[ip]
+	if st == nil || time.Now().After(st.reset) {
+		st = &authFailState{reset: time.Now().Add(authFailWindow)}
+		m.authFail[ip] = st
+	}
+	st.count++
+}
+
+func (m *Middleware) clearAuthFail(ip string) {
+	m.authMu.Lock()
+	defer m.authMu.Unlock()
+	delete(m.authFail, ip)
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -418,5 +528,58 @@ func serveChallenge(w http.ResponseWriter, tunnelID string, difficulty int) {
 	_ = tunnelID // tunnel resolved from Host header, not embedded in page
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
+	fmt.Fprint(w, page)
+}
+
+// ---------------------------------------------------------------------------
+// Login page (password gate)
+// ---------------------------------------------------------------------------
+
+func serveLogin(w http.ResponseWriter, status int, errMsg, redirect string) {
+	// Sanitize + HTML-escape the redirect before embedding it in the form value,
+	// so a crafted return path can't break out of the attribute or inject markup.
+	redirect = html.EscapeString(safeRedirect(redirect, "/auth-verify"))
+	errBlock := ""
+	if errMsg != "" {
+		errBlock = `<p class="err">` + html.EscapeString(errMsg) + `</p>`
+	}
+	page := `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Password required</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;
+         display:flex;align-items:center;justify-content:center;min-height:100vh}
+    .card{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.08);
+          padding:2.5rem;text-align:center;width:100%;max-width:360px}
+    h1{font-size:1.2rem;color:#1e293b;margin-bottom:.4rem}
+    p{color:#64748b;font-size:.875rem;margin-bottom:1.25rem}
+    .err{color:#dc2626;font-size:.85rem;margin-bottom:1rem}
+    input{width:100%;padding:.65rem .75rem;border:1px solid #cbd5e1;border-radius:8px;
+          font-size:.9rem;margin-bottom:.9rem}
+    input:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 2px #bfdbfe}
+    button{width:100%;padding:.65rem;background:#3b82f6;color:#fff;border:0;border-radius:8px;
+           font-size:.9rem;font-weight:600;cursor:pointer}
+    button:hover{background:#2563eb}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Password required</h1>
+    <p>This site is protected. Enter the password to continue.</p>
+    ` + errBlock + `
+    <form method="POST" action="/auth-verify">
+      <input type="hidden" name="redirect" value="` + redirect + `">
+      <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
+      <button type="submit">Continue</button>
+    </form>
+  </div>
+</body>
+</html>`
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	fmt.Fprint(w, page)
 }
