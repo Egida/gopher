@@ -213,18 +213,25 @@ func firewallDisableConflicting(status *FirewallStatus, logWriter io.Writer, sud
 	return nil
 }
 
-func firewallInitRules(logWriter io.Writer, sudo []string) error {
-	// Ordering is anti-lockout — identical rationale to firewallInitRules6:
-	// FirewallConfigure("gopher") is a re-runnable endpoint, so on a second run
-	// INPUT is already DROP from the prior takeover. Resetting INPUT to ACCEPT
-	// BEFORE the flush means the flush never strips the SSH/established allows
-	// while DROP is in force, and adding every allow BEFORE the default-deny
-	// policy means a partial failure mid-sequence leaves INPUT in ACCEPT (its
-	// pre-takeover, still-reachable state) rather than a locked DROP-with-no-SSH.
-	// NOTE: only port 22 is hard-allowed; a non-standard sshd port would be
-	// reachable only via conntrack until reboot. Deployments here run on 22.
-	// All arguments below are hardcoded constants — no user input. #nosec G204
-	steps := [][]string{
+// firewallInitRuleSteps returns the ordered iptables invocations that establish
+// the default-deny INPUT baseline (each step is prefixed with `sudo`).
+//
+// Ordering is anti-lockout — identical rationale to firewallInitRules6:
+// FirewallConfigure("gopher") is a re-runnable endpoint, so on a second run
+// INPUT is already DROP from the prior takeover. Resetting INPUT to ACCEPT
+// BEFORE the flush means the flush never strips the SSH/established allows
+// while DROP is in force, and adding every allow BEFORE the default-deny
+// policy means a partial failure mid-sequence leaves INPUT in ACCEPT (its
+// pre-takeover, still-reachable state) rather than a locked DROP-with-no-SSH.
+// NOTE: only port 22 is hard-allowed; a non-standard sshd port would be
+// reachable only via conntrack until reboot. Deployments here run on 22.
+//
+// This ordering is the single most safety-critical invariant in the file, so
+// it's built as pure data here and asserted by TestFirewallInitRuleOrdering —
+// keep the sequence and that test in sync. All arguments are hardcoded
+// constants — no user input. #nosec G204
+func firewallInitRuleSteps(sudo []string) [][]string {
+	return [][]string{
 		append(sudo, "iptables", "-P", "INPUT", "ACCEPT"),                   // open BEFORE flush (anti-lockout)
 		append(sudo, "iptables", "-F"),                                      // flush rules
 		append(sudo, "iptables", "-X"),                                      // delete user chains
@@ -240,7 +247,10 @@ func firewallInitRules(logWriter io.Writer, sudo []string) error {
 		append(sudo, "iptables", "-P", "FORWARD", "DROP"), // default deny forwarding
 		// Dashboard port (Gopher) is handled via GOPHER_TUNNELS by ApplyDashboardPort, not hardcoded here.
 	}
-	for _, args := range steps {
+}
+
+func firewallInitRules(logWriter io.Writer, sudo []string) error {
+	for _, args := range firewallInitRuleSteps(sudo) {
 		if err := runLocalCmd(logWriter, args[0], args[1:]...); err != nil {
 			return err
 		}
