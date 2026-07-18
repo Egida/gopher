@@ -190,6 +190,8 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 
 	var ratholePort int
 	if req.RatholePort != 0 {
+		// ValidatePort also rejects privileged ports (<1024): the rathole port is
+		// a listener on the edge, so it must be non-privileged.
 		if err := config.ValidatePort(req.RatholePort); err != nil {
 			return nil, &apperrors.ValidationError{Field: "rathole_port", Message: err.Error()}
 		}
@@ -199,6 +201,17 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 		}
 		if exists {
 			return nil, &apperrors.ConflictError{Message: fmt.Sprintf("server port %d is already in use by another tunnel", req.RatholePort)}
+		}
+		// Free in the DB isn't enough — the port must also be free on the box.
+		// The auto-allocator OS-probes every candidate; the explicit path must
+		// too, or a user-supplied port that's held by a core listener (rathole's
+		// own 2333 control channel, Caddy on 80/443, the dashboard, sshd) or any
+		// other process passes validation and then silently fails at rathole
+		// bind time — colliding with 2333 drops the whole tunnel server. Probing
+		// (rather than a hardcoded reserved list) means gopher enforces "nothing
+		// is listening here" without needing to know what owns the port.
+		if !db.PortAvailable(req.RatholePort) {
+			return nil, &apperrors.ConflictError{Message: fmt.Sprintf("server port %d is already in use by a process on the server", req.RatholePort)}
 		}
 		ratholePort = req.RatholePort
 	} else {

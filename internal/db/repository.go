@@ -335,6 +335,14 @@ func allUsedPorts() (map[int]bool, error) {
 // tests can stub it for deterministic allocation.
 var portAvailable = osPortAvailable
 
+// PortAvailable reports whether a port is free to bind on the edge right now.
+// Exposed so the explicit-rathole-port create path can apply the same live
+// OS check the auto-allocator uses, rather than trusting the DB view alone —
+// this is what catches a user-supplied port that's occupied by a core listener
+// (rathole's own 2333 control channel, Caddy on 80/443, the dashboard, sshd) or
+// any other process, without gopher hardcoding which ports those are.
+func PortAvailable(port int) bool { return portAvailable(port) }
+
 // osPortAvailable checks the OS, not just Gopher's DB: it tries to bind the port
 // (TCP and UDP) on all interfaces. This catches ports occupied by anything on
 // the edge that the DB view can't see — including Gopher's own services
