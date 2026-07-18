@@ -167,7 +167,7 @@ export default function ServerPage() {
                   </div>
                   {!status?.domain && (
                     <div className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
-                      <ShieldAlert size={11} /> No domain configured — dashboard port must stay public.
+                      <ShieldAlert size={11} /> No domain configured — without a proxied route the dashboard port must stay Direct.
                     </div>
                   )}
                 </div>
@@ -181,7 +181,7 @@ export default function ServerPage() {
                         : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 disabled:opacity-50'
                     }`}
                   >
-                    <Globe size={11} /> Public
+                    <Globe size={11} /> Direct
                   </button>
                   <button
                     onClick={() => dashboardMutation.mutate(true)}
@@ -193,7 +193,7 @@ export default function ServerPage() {
                         : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
                   >
-                    <Lock size={11} /> Caddy only
+                    <Lock size={11} /> Proxied
                   </button>
                 </div>
               </div>

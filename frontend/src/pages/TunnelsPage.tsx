@@ -57,6 +57,11 @@ export default function TunnelsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [botAdvancedOpen, setBotAdvancedOpen] = useState(false)   // collapsed by default (defaults are fine)
   const [authAdvancedOpen, setAuthAdvancedOpen] = useState(false)
+  // Live server-port availability from the backend (DB + OS probe). The browser
+  // can't probe the VPS itself, so we ask the API as the operator types — this
+  // catches ports held by a process (rathole's 2333, Caddy, the dashboard) that
+  // the client-side DB check can't see, and blocks Create before submit.
+  const [portCheck, setPortCheck] = useState<{ port: number; available: boolean; reason: string } | null>(null)
 
   const openAddModal = async (machineId?: string) => {
     setNextPortLoading(true)
@@ -143,6 +148,22 @@ export default function TunnelsPage() {
     setModal({ isOpen: true })
     return () => { cancelled = true }
   }, [searchParams])
+
+  // Debounced server-port availability check. Only while adding (not editing —
+  // rathole_port isn't editable) and for an in-range port. Re-runs as the port
+  // changes; the stale-guard prevents an old response from clobbering a newer one.
+  useEffect(() => {
+    if (!modal.isOpen || modal.editTunnel) { setPortCheck(null); return }
+    const port = form.rathole_port
+    if (!port || port < 1024 || port > 65535) { setPortCheck(null); return }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      tunnelsApi.checkPort(port)
+        .then(res => { if (!cancelled) setPortCheck({ port, available: res.available, reason: res.reason }) })
+        .catch(() => { if (!cancelled) setPortCheck(null) })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [form.rathole_port, modal.isOpen, modal.editTunnel])
 
   const createMutation = useMutation({
     mutationFn: (d: Partial<FormState>) => tunnelsApi.create(d),
@@ -385,7 +406,7 @@ export default function TunnelsPage() {
                                 <StatusBadge status={t.status} />
                                 {isPrivate && (
                                   <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 flex items-center gap-0.5">
-                                    <Lock size={10} /> Private
+                                    <Lock size={10} /> Proxied
                                   </span>
                                 )}
                                 {t.transport === 'udp' && (
@@ -414,7 +435,7 @@ export default function TunnelsPage() {
                                 <button
                                   onClick={() => togglePrivate(t)}
                                   disabled={updateMutation.isPending || t.bot_protection_enabled || t.auth_enabled}
-                                  title={(t.bot_protection_enabled || t.auth_enabled) ? 'Gated tunnels require private — use Edit to change visibility' : (isPrivate ? 'Make public' : 'Make private')}
+                                  title={(t.bot_protection_enabled || t.auth_enabled) ? 'Gated tunnels must stay Proxied — use Edit to change visibility' : (isPrivate ? 'Switch to Direct (open a raw port)' : 'Switch to Proxied (Caddy/localhost only)')}
                                   className={`p-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed ${isPrivate
                                     ? 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
                                     : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50 hover:text-gray-600'}`}
@@ -452,10 +473,18 @@ export default function TunnelsPage() {
             </div>
             {(() => {
               const isEdit = Boolean(modal.editTunnel)
-              const serverPortConflict = !isEdit && form.rathole_port > 0 && (
+              const serverPortDbConflict = !isEdit && form.rathole_port > 0 && (
                 tunnels.some(t => t.rathole_port === form.rathole_port) ||
                 machines.some(m => m.tunnel_port === form.rathole_port)
               )
+              // Backend probe result, only trusted when it matches the current port
+              // (a debounced response for a stale port must not gate the new one).
+              const serverPortOSConflict = !isEdit && portCheck !== null &&
+                portCheck.port === form.rathole_port && !portCheck.available
+              const serverPortConflict = serverPortDbConflict || serverPortOSConflict
+              const serverPortMessage = serverPortDbConflict
+                ? `Port ${form.rathole_port} is already in use by another tunnel.`
+                : (serverPortOSConflict ? portCheck!.reason : '')
               const localPortConflict = !isEdit && form.local_port > 0 && form.machine_id !== '' &&
                 tunnels.some(t => t.machine_id === form.machine_id && t.local_port === form.local_port)
               // Password protection needs a password: either one already exists
@@ -558,7 +587,7 @@ export default function TunnelsPage() {
                 </div>
                 {serverPortConflict && (
                   <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    ⚠ Port {form.rathole_port} is already in use.
+                    ⚠ {serverPortMessage}
                   </p>
                 )}
               </div>
@@ -572,10 +601,10 @@ export default function TunnelsPage() {
                   <span className="relative group">
                     <Info size={13} className="text-gray-400 cursor-help" />
                     <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 w-64 bg-gray-900 text-white text-xs rounded-lg px-3 py-2 hidden group-hover:block z-50 shadow-lg pointer-events-none">
-                      <p><strong>Private</strong> binds 127.0.0.1 — the port is only reachable from the VPS itself (or via its Caddy subdomain), not directly on the public internet.</p>
-                      <p className="mt-1"><strong>Public</strong> binds 0.0.0.0 — the raw port is open on all interfaces.</p>
+                      <p><strong>Proxied</strong> binds 127.0.0.1 — no raw public port. The tunnel is reachable only through its HTTPS subdomain (via Caddy) or from the VPS itself.</p>
+                      <p className="mt-1"><strong>Direct</strong> binds 0.0.0.0 — a raw port is open on all interfaces, reachable directly by IP:port.</p>
                       {routingEnabled && form.subdomain.trim() !== '' && (
-                        <p className="mt-1 text-blue-300">Since you have a subdomain, traffic routes through Caddy — keeping it private is recommended.</p>
+                        <p className="mt-1 text-blue-300">Since you have a subdomain, traffic routes through Caddy — Proxied is recommended.</p>
                       )}
                     </div>
                   </span>
@@ -589,7 +618,7 @@ export default function TunnelsPage() {
                           ? priv ? 'bg-slate-700 text-white border-slate-700' : 'bg-green-600 text-white border-green-600'
                           : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
                       }`}>
-                      {priv ? <><Lock size={12} /> Private</> : <><Globe size={12} /> Public</>}
+                      {priv ? <><Lock size={12} /> Proxied</> : <><Globe size={12} /> Direct</>}
                     </button>
                   ))}
                 </div>
@@ -656,7 +685,7 @@ export default function TunnelsPage() {
               ) : null}
 
               {/* Access control — bot protection + password auth. Both require a
-                  subdomain (Host-header routing) and coerce the tunnel private. */}
+                  subdomain (Host-header routing) and coerce the tunnel to Proxied. */}
               {routingEnabled && form.transport !== 'udp' && form.subdomain.trim() !== '' && (
                 <div className="border border-gray-200 rounded-lg p-3 space-y-3">
                   <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -664,7 +693,7 @@ export default function TunnelsPage() {
                   </div>
                   <p className="flex items-start gap-1.5 text-xs text-gray-500">
                     <Lock size={12} className="mt-0.5 shrink-0 text-gray-400" />
-                    Gates require a Private tunnel (Caddy-only) — enabling one switches Visibility to Private, since a public raw port would bypass it.
+                    Gates require a Proxied tunnel (Caddy-only) — enabling one switches Visibility to Proxied, since a Direct raw port would bypass it.
                   </p>
 
                   {/* ── Bot Protection ── */}

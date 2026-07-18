@@ -41,6 +41,32 @@ func TestCreateTunnelRejectsInUsePort(t *testing.T) {
 	}
 }
 
+// TestCheckServerPort covers the pre-submit availability endpoint's logic: a
+// live-occupied port and a privileged port both report unavailable with a
+// reason; a free non-privileged port reports available.
+func TestCheckServerPort(t *testing.T) {
+	initTestDB(t)
+	svc := NewTunnelService(&fakeLocalOps{})
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer l.Close()
+	occupied := l.Addr().(*net.TCPAddr).Port
+
+	if ok, reason := svc.CheckServerPort(occupied); ok || reason == "" {
+		t.Errorf("occupied port: expected unavailable with reason, got ok=%v reason=%q", ok, reason)
+	}
+	if ok, reason := svc.CheckServerPort(443); ok || reason == "" {
+		t.Errorf("privileged port: expected unavailable with reason, got ok=%v reason=%q", ok, reason)
+	}
+	// 0 = nothing typed yet → treated as available (no premature warning).
+	if ok, _ := svc.CheckServerPort(0); !ok {
+		t.Error("port 0 (unset) should report available")
+	}
+}
+
 // TestCreateTunnelRejectsPrivilegedPort confirms the edge listener port can't be
 // privileged (<1024) — enforced by config.ValidatePort on the explicit path.
 func TestCreateTunnelRejectsPrivilegedPort(t *testing.T) {

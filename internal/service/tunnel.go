@@ -151,6 +151,28 @@ func (s *TunnelService) NextPort() (int, error) {
 	return db.NextRatholePort()
 }
 
+// CheckServerPort reports whether an explicit rathole (server) port would be
+// accepted by Create: it must be non-privileged, unassigned in the DB, and
+// actually free on the box. Lets the UI warn (and block submit) before the user
+// hits Create, catching process-occupied ports (rathole's 2333, Caddy, the
+// dashboard) that the client-side DB check can't see. Mirrors the checks in
+// Create so the two never disagree.
+func (s *TunnelService) CheckServerPort(port int) (available bool, reason string) {
+	if port == 0 {
+		return true, ""
+	}
+	if err := config.ValidatePort(port); err != nil {
+		return false, err.Error()
+	}
+	if exists, err := db.CheckRatholePortExists(port); err == nil && exists {
+		return false, fmt.Sprintf("port %d is already assigned to another tunnel or machine", port)
+	}
+	if !db.PortAvailable(port) {
+		return false, fmt.Sprintf("port %d is already in use by a process on the server", port)
+	}
+	return true, ""
+}
+
 func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) {
 	settings, err := db.GetSettings()
 	if err != nil {

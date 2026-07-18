@@ -167,6 +167,7 @@ func NewRouter(
 			r.Route("/tunnels", func(r chi.Router) {
 				r.Get("/", tunnelH.List)
 				r.Get("/next-port", tunnelH.NextPort)
+				r.Get("/port-check", tunnelH.CheckPort)
 				r.Post("/", tunnelH.Create)
 				r.Get("/{id}", tunnelH.Get)
 				r.Put("/{id}", tunnelH.Update)
