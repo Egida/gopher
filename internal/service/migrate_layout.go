@@ -30,9 +30,8 @@ import (
 // fresh install with no legacy files — the install flow creates /etc/gopher
 // directly in that case).
 //
-// NOT YET VERIFIED END-TO-END. Must be exercised against a real legacy install
-// on a throwaway VPS — confirming certs survive (no re-issue) and existing
-// clients reconnect — before this path runs on a production edge.
+// Exercised against a real legacy install (production edge, 2026-07-18):
+// certs survived without re-issue and existing clients reconnected.
 func MigrateEdgeLayout(w io.Writer) (migrated bool, err error) {
 	// Gate on a dedicated marker, NOT on server.toml — the boot reconcile creates
 	// server.toml, so keying off it would make us skip the cert-move + service
