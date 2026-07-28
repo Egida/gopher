@@ -40,6 +40,7 @@ const (
 	AgentControl_Uninstall_FullMethodName        = "/agent.v1.AgentControl/Uninstall"
 	AgentControl_GetNetworkInfo_FullMethodName   = "/agent.v1.AgentControl/GetNetworkInfo"
 	AgentControl_SetManagedKey_FullMethodName    = "/agent.v1.AgentControl/SetManagedKey"
+	AgentControl_CheckPorts_FullMethodName       = "/agent.v1.AgentControl/CheckPorts"
 )
 
 // AgentControlClient is the client API for AgentControl service.
@@ -87,6 +88,13 @@ type AgentControlClient interface {
 	// key, and keeps authorized_keys from accumulating stale keys. (Added in agent
 	// 0.2.2; older agents return Unimplemented.)
 	SetManagedKey(ctx context.Context, in *SetManagedKeyRequest, opts ...grpc.CallOption) (*SetManagedKeyResponse, error)
+	// CheckPorts reports whether the origin is bound/listening on the given local
+	// ports (tcp/udp), read from /proc/net. This is the definitive idle-vs-serving
+	// signal the server cannot get by probing the rathole port from the edge —
+	// impossible for UDP (connectionless), and only heuristic for TCP. (Added in
+	// agent 0.2.3; older agents return Unimplemented and the server falls back to
+	// the edge probe.)
+	CheckPorts(ctx context.Context, in *CheckPortsRequest, opts ...grpc.CallOption) (*CheckPortsResponse, error)
 }
 
 type agentControlClient struct {
@@ -206,6 +214,16 @@ func (c *agentControlClient) SetManagedKey(ctx context.Context, in *SetManagedKe
 	return out, nil
 }
 
+func (c *agentControlClient) CheckPorts(ctx context.Context, in *CheckPortsRequest, opts ...grpc.CallOption) (*CheckPortsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckPortsResponse)
+	err := c.cc.Invoke(ctx, AgentControl_CheckPorts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentControlServer is the server API for AgentControl service.
 // All implementations must embed UnimplementedAgentControlServer
 // for forward compatibility.
@@ -251,6 +269,13 @@ type AgentControlServer interface {
 	// key, and keeps authorized_keys from accumulating stale keys. (Added in agent
 	// 0.2.2; older agents return Unimplemented.)
 	SetManagedKey(context.Context, *SetManagedKeyRequest) (*SetManagedKeyResponse, error)
+	// CheckPorts reports whether the origin is bound/listening on the given local
+	// ports (tcp/udp), read from /proc/net. This is the definitive idle-vs-serving
+	// signal the server cannot get by probing the rathole port from the edge —
+	// impossible for UDP (connectionless), and only heuristic for TCP. (Added in
+	// agent 0.2.3; older agents return Unimplemented and the server falls back to
+	// the edge probe.)
+	CheckPorts(context.Context, *CheckPortsRequest) (*CheckPortsResponse, error)
 	mustEmbedUnimplementedAgentControlServer()
 }
 
@@ -290,6 +315,9 @@ func (UnimplementedAgentControlServer) GetNetworkInfo(context.Context, *GetNetwo
 }
 func (UnimplementedAgentControlServer) SetManagedKey(context.Context, *SetManagedKeyRequest) (*SetManagedKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetManagedKey not implemented")
+}
+func (UnimplementedAgentControlServer) CheckPorts(context.Context, *CheckPortsRequest) (*CheckPortsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckPorts not implemented")
 }
 func (UnimplementedAgentControlServer) mustEmbedUnimplementedAgentControlServer() {}
 func (UnimplementedAgentControlServer) testEmbeddedByValue()                      {}
@@ -485,6 +513,24 @@ func _AgentControl_SetManagedKey_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentControl_CheckPorts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckPortsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).CheckPorts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_CheckPorts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).CheckPorts(ctx, req.(*CheckPortsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentControl_ServiceDesc is the grpc.ServiceDesc for AgentControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -527,6 +573,10 @@ var AgentControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetManagedKey",
 			Handler:    _AgentControl_SetManagedKey_Handler,
+		},
+		{
+			MethodName: "CheckPorts",
+			Handler:    _AgentControl_CheckPorts_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -239,6 +239,30 @@ func (c *AgentClient) SetManagedKey(ctx context.Context, username, publicKey str
 	return nil
 }
 
+// PortListening asks the agent whether the origin has a socket bound to
+// port/proto (read from /proc/net). This is the definitive idle-vs-serving
+// signal for a tunnel's local service. Returns codes.Unimplemented from agents
+// older than 0.2.3, so callers fall back to edge probing.
+func (c *AgentClient) PortListening(ctx context.Context, port int, proto string) (bool, error) {
+	conn, err := c.dial()
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+	resp, err := agentpb.NewAgentControlClient(conn).CheckPorts(ctx, &agentpb.CheckPortsRequest{
+		Ports: []*agentpb.PortQuery{{Port: uint32(port), Proto: proto}},
+	})
+	if err != nil {
+		return false, fmt.Errorf("agent CheckPorts: %w", err)
+	}
+	for _, p := range resp.GetPorts() {
+		if int(p.GetPort()) == port {
+			return p.GetListening(), nil
+		}
+	}
+	return false, fmt.Errorf("agent CheckPorts: no result for port %d", port)
+}
+
 // Version returns the agent build version. Useful for detecting when an agent
 // install has completed and is reachable.
 func (c *AgentClient) Version(ctx context.Context) (string, error) {

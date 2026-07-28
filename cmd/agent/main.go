@@ -52,7 +52,11 @@ const (
 	// authorized_keys (tagged `gopher-managed`), so the file can't accumulate
 	// stale keys. Additive RPCs — older agents return Unimplemented — so
 	// protocolVersion is unchanged.
-	agentVersion = "0.2.2"
+	// 0.2.3: add CheckPorts RPC — reports whether the origin's local service
+	// ports are bound (from /proc/net), giving the server a definitive
+	// idle-vs-serving signal it can't get by probing the rathole port (needed
+	// for UDP tunnels, cleaner for TCP). Additive — protocolVersion unchanged.
+	agentVersion = "0.2.3"
 
 	// protocolVersion is the wire-compatibility contract between server and
 	// agent. The server gates compatibility on this integer, NOT on the semver

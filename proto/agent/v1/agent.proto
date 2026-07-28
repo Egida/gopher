@@ -64,6 +64,14 @@ service AgentControl {
   // key, and keeps authorized_keys from accumulating stale keys. (Added in agent
   // 0.2.2; older agents return Unimplemented.)
   rpc SetManagedKey(SetManagedKeyRequest) returns (SetManagedKeyResponse);
+
+  // CheckPorts reports whether the origin is bound/listening on the given local
+  // ports (tcp/udp), read from /proc/net. This is the definitive idle-vs-serving
+  // signal the server cannot get by probing the rathole port from the edge —
+  // impossible for UDP (connectionless), and only heuristic for TCP. (Added in
+  // agent 0.2.3; older agents return Unimplemented and the server falls back to
+  // the edge probe.)
+  rpc CheckPorts(CheckPortsRequest) returns (CheckPortsResponse);
 }
 
 message GetVersionRequest {}
@@ -166,3 +174,22 @@ message SetManagedKeyRequest {
 }
 
 message SetManagedKeyResponse {}
+
+message CheckPortsRequest {
+  repeated PortQuery ports = 1;
+}
+
+message PortQuery {
+  uint32 port = 1;
+  string proto = 2; // "tcp" | "udp"
+}
+
+message CheckPortsResponse {
+  repeated PortState ports = 1;
+}
+
+message PortState {
+  uint32 port = 1;
+  string proto = 2;
+  bool listening = 3; // a socket is bound to this port on the origin
+}

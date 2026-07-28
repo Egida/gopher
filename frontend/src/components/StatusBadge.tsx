@@ -3,7 +3,12 @@ interface Props { status: string; className?: string }
 export default function StatusBadge({ status, className = '' }: Props) {
   const s = status.toLowerCase()
   let color = 'bg-gray-400'
-  if (s === 'active' || s === 'connected') color = 'bg-green-500'
+  // Distinct hue per confidence level, not shades of one hue — active
+  // (confirmed responding) and connected (up but didn't answer the probe)
+  // read too similarly as two shades of green at a glance. Idle = amber,
+  // offline = red.
+  if (s === 'active') color = 'bg-green-500'
+  else if (s === 'connected') color = 'bg-blue-500'
   else if (s === 'idle') color = 'bg-amber-400'
   else if (s === 'pending' || s === 'connecting') color = 'bg-yellow-500'
   else if (s === 'inactive' || s === 'disconnected') color = 'bg-gray-400'

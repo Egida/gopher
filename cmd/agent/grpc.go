@@ -275,6 +275,64 @@ chown -R "$u:$u" "$home/.ssh"`
 	return &agentpb.SetManagedKeyResponse{}, nil
 }
 
+// CheckPorts reports, per requested port, whether the origin has a socket bound
+// to it — read from /proc/net, so it's read-only and works identically for TCP
+// (state LISTEN) and UDP (any bound socket). This is the definitive
+// idle-vs-serving signal the server can't get by probing the rathole port from
+// the edge.
+func (s *agentServer) CheckPorts(_ context.Context, in *agentpb.CheckPortsRequest) (*agentpb.CheckPortsResponse, error) {
+	resp := &agentpb.CheckPortsResponse{}
+	for _, q := range in.GetPorts() {
+		proto := q.GetProto()
+		if proto != "udp" {
+			proto = "tcp"
+		}
+		resp.Ports = append(resp.Ports, &agentpb.PortState{
+			Port:      q.GetPort(),
+			Proto:     proto,
+			Listening: portListening(int(q.GetPort()), proto),
+		})
+	}
+	return resp, nil
+}
+
+// portListening scans /proc/net for a socket bound to port. For TCP it requires
+// state 0A (LISTEN); for UDP any bound socket counts (UDP has no LISTEN state).
+// Checks both IPv4 and IPv6 tables since a service may bind :: / ::1.
+func portListening(port int, proto string) bool {
+	tcp := proto != "udp"
+	files := []string{"/proc/net/udp", "/proc/net/udp6"}
+	if tcp {
+		files = []string{"/proc/net/tcp", "/proc/net/tcp6"}
+	}
+	target := fmt.Sprintf("%04X", port) // /proc/net encodes the port as uppercase hex
+	for _, f := range files {
+		data, err := os.ReadFile(f) // #nosec G304 — fixed procfs paths
+		if err != nil {
+			continue
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if i == 0 {
+				continue // header row
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 4 {
+				continue
+			}
+			// fields[1] = local_address "IPHEX:PORTHEX"; fields[3] = state.
+			la := fields[1]
+			colon := strings.LastIndex(la, ":")
+			if colon < 0 || la[colon+1:] != target {
+				continue
+			}
+			if !tcp || fields[3] == "0A" { // UDP: any bound socket; TCP: LISTEN only
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 func (s *agentServer) buildStatus() *agentpb.StatusInfo {

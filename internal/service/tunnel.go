@@ -66,6 +66,14 @@ func agentTunnelStatus(m *db.Machine) string {
 	return "pending"
 }
 
+// machineTunnelStatus translates a machine's binary reachability into the
+// tunnel status vocabulary. Machine "connected" already requires a real SSH
+// banner byte-read (see probeMachineSSH), not just a successful TCP
+// handshake — that's a confirmed response, which is what "active" means at
+// the tunnel-status layer. It does NOT map to tunnel-status "connected",
+// which means "reachable but silent" — a middle state probeMachineSSH never
+// produces (it's binary: banner arrives, or the machine is offline). Same
+// word, two different confidence levels depending on layer.
 func machineTunnelStatus(status string) string {
 	if status == "connected" {
 		return "active"
@@ -144,7 +152,7 @@ func (s *TunnelService) Get(id string) (*db.Tunnel, error) {
 // "active", "idle", or "offline". It uses the same logic as the background
 // monitor so the result is consistent with what the dashboard shows.
 func (s *TunnelService) Probe(t *db.Tunnel) string {
-	return probeTunnel(*t)
+	return tunnelStatus(*t)
 }
 
 func (s *TunnelService) NextPort() (int, error) {

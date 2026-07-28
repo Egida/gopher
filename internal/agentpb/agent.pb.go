@@ -1128,6 +1128,206 @@ func (*SetManagedKeyResponse) Descriptor() ([]byte, []int) {
 	return file_agent_v1_agent_proto_rawDescGZIP(), []int{20}
 }
 
+type CheckPortsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ports         []*PortQuery           `protobuf:"bytes,1,rep,name=ports,proto3" json:"ports,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckPortsRequest) Reset() {
+	*x = CheckPortsRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckPortsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckPortsRequest) ProtoMessage() {}
+
+func (x *CheckPortsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckPortsRequest.ProtoReflect.Descriptor instead.
+func (*CheckPortsRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *CheckPortsRequest) GetPorts() []*PortQuery {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+type PortQuery struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Port          uint32                 `protobuf:"varint,1,opt,name=port,proto3" json:"port,omitempty"`
+	Proto         string                 `protobuf:"bytes,2,opt,name=proto,proto3" json:"proto,omitempty"` // "tcp" | "udp"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PortQuery) Reset() {
+	*x = PortQuery{}
+	mi := &file_agent_v1_agent_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PortQuery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PortQuery) ProtoMessage() {}
+
+func (x *PortQuery) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PortQuery.ProtoReflect.Descriptor instead.
+func (*PortQuery) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *PortQuery) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *PortQuery) GetProto() string {
+	if x != nil {
+		return x.Proto
+	}
+	return ""
+}
+
+type CheckPortsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ports         []*PortState           `protobuf:"bytes,1,rep,name=ports,proto3" json:"ports,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckPortsResponse) Reset() {
+	*x = CheckPortsResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckPortsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckPortsResponse) ProtoMessage() {}
+
+func (x *CheckPortsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckPortsResponse.ProtoReflect.Descriptor instead.
+func (*CheckPortsResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *CheckPortsResponse) GetPorts() []*PortState {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+type PortState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Port          uint32                 `protobuf:"varint,1,opt,name=port,proto3" json:"port,omitempty"`
+	Proto         string                 `protobuf:"bytes,2,opt,name=proto,proto3" json:"proto,omitempty"`
+	Listening     bool                   `protobuf:"varint,3,opt,name=listening,proto3" json:"listening,omitempty"` // a socket is bound to this port on the origin
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PortState) Reset() {
+	*x = PortState{}
+	mi := &file_agent_v1_agent_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PortState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PortState) ProtoMessage() {}
+
+func (x *PortState) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PortState.ProtoReflect.Descriptor instead.
+func (*PortState) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *PortState) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *PortState) GetProto() string {
+	if x != nil {
+		return x.Proto
+	}
+	return ""
+}
+
+func (x *PortState) GetListening() bool {
+	if x != nil {
+		return x.Listening
+	}
+	return false
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -1201,7 +1401,18 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x02 \x01(\tR\tpublicKey\"\x17\n" +
-	"\x15SetManagedKeyResponse2\xf8\x05\n" +
+	"\x15SetManagedKeyResponse\">\n" +
+	"\x11CheckPortsRequest\x12)\n" +
+	"\x05ports\x18\x01 \x03(\v2\x13.agent.v1.PortQueryR\x05ports\"5\n" +
+	"\tPortQuery\x12\x12\n" +
+	"\x04port\x18\x01 \x01(\rR\x04port\x12\x14\n" +
+	"\x05proto\x18\x02 \x01(\tR\x05proto\"?\n" +
+	"\x12CheckPortsResponse\x12)\n" +
+	"\x05ports\x18\x01 \x03(\v2\x13.agent.v1.PortStateR\x05ports\"S\n" +
+	"\tPortState\x12\x12\n" +
+	"\x04port\x18\x01 \x01(\rR\x04port\x12\x14\n" +
+	"\x05proto\x18\x02 \x01(\tR\x05proto\x12\x1c\n" +
+	"\tlistening\x18\x03 \x01(\bR\tlistening2\xc1\x06\n" +
 	"\fAgentControl\x12@\n" +
 	"\n" +
 	"GetVersion\x12\x1b.agent.v1.GetVersionRequest\x1a\x15.agent.v1.VersionInfo\x12=\n" +
@@ -1213,7 +1424,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\vDiagnostics\x12\x1c.agent.v1.DiagnosticsRequest\x1a\x1d.agent.v1.DiagnosticsResponse\x12D\n" +
 	"\tUninstall\x12\x1a.agent.v1.UninstallRequest\x1a\x1b.agent.v1.UninstallResponse\x12H\n" +
 	"\x0eGetNetworkInfo\x12\x1f.agent.v1.GetNetworkInfoRequest\x1a\x15.agent.v1.NetworkInfo\x12P\n" +
-	"\rSetManagedKey\x12\x1e.agent.v1.SetManagedKeyRequest\x1a\x1f.agent.v1.SetManagedKeyResponseB5Z3github.com/smalex-z/gopher/internal/agentpb;agentpbb\x06proto3"
+	"\rSetManagedKey\x12\x1e.agent.v1.SetManagedKeyRequest\x1a\x1f.agent.v1.SetManagedKeyResponse\x12G\n" +
+	"\n" +
+	"CheckPorts\x12\x1b.agent.v1.CheckPortsRequest\x1a\x1c.agent.v1.CheckPortsResponseB5Z3github.com/smalex-z/gopher/internal/agentpb;agentpbb\x06proto3"
 
 var (
 	file_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -1227,7 +1440,7 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_agent_v1_agent_proto_rawDescData
 }
 
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_agent_v1_agent_proto_goTypes = []any{
 	(*GetVersionRequest)(nil),        // 0: agent.v1.GetVersionRequest
 	(*VersionInfo)(nil),              // 1: agent.v1.VersionInfo
@@ -1250,36 +1463,44 @@ var file_agent_v1_agent_proto_goTypes = []any{
 	(*NetworkInfo)(nil),              // 18: agent.v1.NetworkInfo
 	(*SetManagedKeyRequest)(nil),     // 19: agent.v1.SetManagedKeyRequest
 	(*SetManagedKeyResponse)(nil),    // 20: agent.v1.SetManagedKeyResponse
+	(*CheckPortsRequest)(nil),        // 21: agent.v1.CheckPortsRequest
+	(*PortQuery)(nil),                // 22: agent.v1.PortQuery
+	(*CheckPortsResponse)(nil),       // 23: agent.v1.CheckPortsResponse
+	(*PortState)(nil),                // 24: agent.v1.PortState
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.StatusInfo.rathole:type_name -> agent.v1.RatholeStatus
 	6,  // 1: agent.v1.StatusInfo.system:type_name -> agent.v1.SystemStatus
 	14, // 2: agent.v1.DiagnosticsResponse.checks:type_name -> agent.v1.DiagCheck
-	0,  // 3: agent.v1.AgentControl.GetVersion:input_type -> agent.v1.GetVersionRequest
-	2,  // 4: agent.v1.AgentControl.GetStatus:input_type -> agent.v1.GetStatusRequest
-	3,  // 5: agent.v1.AgentControl.WatchStatus:input_type -> agent.v1.WatchStatusRequest
-	7,  // 6: agent.v1.AgentControl.RestartRathole:input_type -> agent.v1.RestartRatholeRequest
-	9,  // 7: agent.v1.AgentControl.GetRatholeConfig:input_type -> agent.v1.GetRatholeConfigRequest
-	10, // 8: agent.v1.AgentControl.PutRatholeConfig:input_type -> agent.v1.RatholeConfig
-	12, // 9: agent.v1.AgentControl.Diagnostics:input_type -> agent.v1.DiagnosticsRequest
-	15, // 10: agent.v1.AgentControl.Uninstall:input_type -> agent.v1.UninstallRequest
-	17, // 11: agent.v1.AgentControl.GetNetworkInfo:input_type -> agent.v1.GetNetworkInfoRequest
-	19, // 12: agent.v1.AgentControl.SetManagedKey:input_type -> agent.v1.SetManagedKeyRequest
-	1,  // 13: agent.v1.AgentControl.GetVersion:output_type -> agent.v1.VersionInfo
-	4,  // 14: agent.v1.AgentControl.GetStatus:output_type -> agent.v1.StatusInfo
-	4,  // 15: agent.v1.AgentControl.WatchStatus:output_type -> agent.v1.StatusInfo
-	8,  // 16: agent.v1.AgentControl.RestartRathole:output_type -> agent.v1.RestartRatholeResponse
-	10, // 17: agent.v1.AgentControl.GetRatholeConfig:output_type -> agent.v1.RatholeConfig
-	11, // 18: agent.v1.AgentControl.PutRatholeConfig:output_type -> agent.v1.PutRatholeConfigResponse
-	13, // 19: agent.v1.AgentControl.Diagnostics:output_type -> agent.v1.DiagnosticsResponse
-	16, // 20: agent.v1.AgentControl.Uninstall:output_type -> agent.v1.UninstallResponse
-	18, // 21: agent.v1.AgentControl.GetNetworkInfo:output_type -> agent.v1.NetworkInfo
-	20, // 22: agent.v1.AgentControl.SetManagedKey:output_type -> agent.v1.SetManagedKeyResponse
-	13, // [13:23] is the sub-list for method output_type
-	3,  // [3:13] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	22, // 3: agent.v1.CheckPortsRequest.ports:type_name -> agent.v1.PortQuery
+	24, // 4: agent.v1.CheckPortsResponse.ports:type_name -> agent.v1.PortState
+	0,  // 5: agent.v1.AgentControl.GetVersion:input_type -> agent.v1.GetVersionRequest
+	2,  // 6: agent.v1.AgentControl.GetStatus:input_type -> agent.v1.GetStatusRequest
+	3,  // 7: agent.v1.AgentControl.WatchStatus:input_type -> agent.v1.WatchStatusRequest
+	7,  // 8: agent.v1.AgentControl.RestartRathole:input_type -> agent.v1.RestartRatholeRequest
+	9,  // 9: agent.v1.AgentControl.GetRatholeConfig:input_type -> agent.v1.GetRatholeConfigRequest
+	10, // 10: agent.v1.AgentControl.PutRatholeConfig:input_type -> agent.v1.RatholeConfig
+	12, // 11: agent.v1.AgentControl.Diagnostics:input_type -> agent.v1.DiagnosticsRequest
+	15, // 12: agent.v1.AgentControl.Uninstall:input_type -> agent.v1.UninstallRequest
+	17, // 13: agent.v1.AgentControl.GetNetworkInfo:input_type -> agent.v1.GetNetworkInfoRequest
+	19, // 14: agent.v1.AgentControl.SetManagedKey:input_type -> agent.v1.SetManagedKeyRequest
+	21, // 15: agent.v1.AgentControl.CheckPorts:input_type -> agent.v1.CheckPortsRequest
+	1,  // 16: agent.v1.AgentControl.GetVersion:output_type -> agent.v1.VersionInfo
+	4,  // 17: agent.v1.AgentControl.GetStatus:output_type -> agent.v1.StatusInfo
+	4,  // 18: agent.v1.AgentControl.WatchStatus:output_type -> agent.v1.StatusInfo
+	8,  // 19: agent.v1.AgentControl.RestartRathole:output_type -> agent.v1.RestartRatholeResponse
+	10, // 20: agent.v1.AgentControl.GetRatholeConfig:output_type -> agent.v1.RatholeConfig
+	11, // 21: agent.v1.AgentControl.PutRatholeConfig:output_type -> agent.v1.PutRatholeConfigResponse
+	13, // 22: agent.v1.AgentControl.Diagnostics:output_type -> agent.v1.DiagnosticsResponse
+	16, // 23: agent.v1.AgentControl.Uninstall:output_type -> agent.v1.UninstallResponse
+	18, // 24: agent.v1.AgentControl.GetNetworkInfo:output_type -> agent.v1.NetworkInfo
+	20, // 25: agent.v1.AgentControl.SetManagedKey:output_type -> agent.v1.SetManagedKeyResponse
+	23, // 26: agent.v1.AgentControl.CheckPorts:output_type -> agent.v1.CheckPortsResponse
+	16, // [16:27] is the sub-list for method output_type
+	5,  // [5:16] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_agent_v1_agent_proto_init() }
@@ -1293,7 +1514,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

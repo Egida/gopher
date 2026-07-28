@@ -343,7 +343,23 @@ export default function TunnelsPage() {
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     {['Name', 'Machine', 'Routing', 'Status', 'Uptime', 'Actions'].map(h => (
-                      <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                      <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                        {h === 'Status' ? (
+                          <span className="inline-flex items-center gap-1">
+                            Status
+                            <span className="relative group">
+                              <Info size={12} className="text-gray-400 cursor-help" />
+                              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 w-72 bg-gray-900 text-white text-xs rounded-lg px-3 py-2 hidden group-hover:block z-50 shadow-lg pointer-events-none font-normal normal-case tracking-normal text-left">
+                                <p className="mb-1.5 text-gray-300">gopher passes real traffic through the tunnel's server port, then asks the origin's agent whether the local port is actually listening.</p>
+                                <p><span className="text-green-300 font-semibold">Active</span> — traffic reached the service and it responded; the whole path works.</p>
+                                <p className="mt-1"><span className="text-green-300 font-semibold">Connected</span> — tunnel up and the port is listening, but the service didn't answer the probe (normal for speak-first apps like SSH, MySQL, Minecraft).</p>
+                                <p className="mt-1"><span className="text-amber-300 font-semibold">Idle</span> — tunnel up, but nothing is listening on the origin's local port.</p>
+                                <p className="mt-1"><span className="text-red-300 font-semibold">Offline</span> — the tunnel path is down (server port unreachable, or the machine is offline).</p>
+                              </div>
+                            </span>
+                          </span>
+                        ) : h}
+                      </th>
                     ))}
                   </tr>
                 </thead>
