@@ -12,7 +12,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../proto"
-export PATH="$(go env GOPATH)/bin:$PATH"
+GOBIN_DIR="$(go env GOPATH)/bin"
+export PATH="$GOBIN_DIR:$PATH"
 
 echo "==> buf lint"
 buf lint

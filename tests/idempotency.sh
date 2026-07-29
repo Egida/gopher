@@ -8,6 +8,7 @@ set -euo pipefail
 GOPHER_PORT=8181
 GOPHER_DB="test-idempotency.db"
 COOKIE_JAR=""
+# shellcheck disable=SC2034  # set here, consumed by sourced lib.sh
 GOPHER_PID=""
 GOPHER_LOG=""
 
@@ -27,6 +28,7 @@ command -v jq >/dev/null 2>&1 || fail "jq is required but not installed"
 command -v sqlite3 >/dev/null 2>&1 || fail "sqlite3 is required but not installed"
 
 COOKIE_JAR=$(mktemp /tmp/gopher-cookies.XXXXX)
+# shellcheck disable=SC2034  # set here, consumed by sourced lib.sh
 GOPHER_LOG=$(mktemp /tmp/gopher-stderr.XXXXX)
 
 # ── Start Server ───────────────────────────────────────────────────────────────
