@@ -185,9 +185,13 @@ func (h *BootstrapHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mt, err := db.GetMigrationToken(req.Token)
+	mt, err := db.ClaimMigrationToken(req.Token)
 	if err != nil {
-		response.BadRequest(w, "invalid or expired migration token")
+		// Single-use: a re-run after a failed install needs a fresh token
+		// (this response hands out the machine's credentials, so tokens
+		// must not be replayable inside their TTL). Say so — "expired" alone
+		// sends the operator down the wrong debugging path.
+		response.BadRequest(w, "invalid, expired, or already-used migration token — generate a new install command from the dashboard")
 		return
 	}
 	machine, err := db.GetMachine(mt.MachineID)

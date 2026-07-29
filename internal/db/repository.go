@@ -1,6 +1,7 @@
 package db
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net"
 	"strconv"
@@ -76,6 +77,12 @@ func GetMachineByAgentToken(token string) (*Machine, error) {
 			return nil, &apperrors.NotFoundError{Resource: "machine", ID: "(by agent token)"}
 		}
 		return nil, err
+	}
+	// Re-check in constant time: the SQL lookup is what found the row, but a
+	// bearer credential should never be accepted on a comparison whose timing
+	// (or collation) we don't control.
+	if subtle.ConstantTimeCompare([]byte(m.AgentToken), []byte(token)) != 1 {
+		return nil, &apperrors.NotFoundError{Resource: "machine", ID: "(by agent token)"}
 	}
 	return &m, nil
 }
@@ -592,23 +599,29 @@ func CreateMigrationToken(token, machineID string, ttl time.Duration) error {
 	return DB.Create(mt).Error
 }
 
-// GetMigrationToken resolves a migration token to its target machine ID.
-// Returns an error if the token is unknown or expired.
+// ClaimMigrationToken atomically consumes a migration token and returns its
+// target machine ID. Same single-conditional-UPDATE pattern as
+// ClaimBootstrapToken: only the request whose UPDATE changes the row wins.
 //
-// The token is NOT consumed on first read — migrate.sh is idempotent and the
-// operator may need to re-run it within the TTL window (rate-limited
-// connection, retry after fixing a one-off network issue, etc.). After the
-// TTL elapses the dashboard generates a new token.
-func GetMigrationToken(token string) (*MigrationToken, error) {
+// Tokens used to be replayable for their whole TTL so migrate.sh re-runs
+// were free — but POST /api/migrate returns the machine's agent and rathole
+// credentials, so a leaked token (shell history, pasted command) was a 1-hour
+// credential-disclosure window. A failed migrate.sh run now needs a fresh
+// token from the dashboard (one click on Install agent).
+func ClaimMigrationToken(token string) (*MigrationToken, error) {
+	now := time.Now()
+	res := DB.Model(&MigrationToken{}).
+		Where("token = ? AND used_at IS NULL AND expires_at > ?", token, now).
+		Update("used_at", now)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, &apperrors.NotFoundError{Resource: "migration_token", ID: token}
+	}
 	var mt MigrationToken
 	if err := DB.First(&mt, "token = ?", token).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, &apperrors.NotFoundError{Resource: "migration_token", ID: token}
-		}
 		return nil, err
-	}
-	if time.Now().After(mt.ExpiresAt) {
-		return nil, fmt.Errorf("migration token expired")
 	}
 	return &mt, nil
 }

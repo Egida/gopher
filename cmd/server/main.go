@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -16,7 +17,9 @@ import (
 
 	"github.com/smalex-z/gopher/internal/api"
 	"github.com/smalex-z/gopher/internal/api/handlers"
+	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/embedbin"
 	"github.com/smalex-z/gopher/internal/proxy"
 	"github.com/smalex-z/gopher/internal/service"
 )
@@ -43,6 +46,13 @@ func main() {
 			if err := runUninstall(os.Args[2:]); err != nil {
 				log.Fatalf("Uninstall failed: %v", err)
 			}
+			return
+		case "version", "--version", "-v":
+			// Release CI smoke-checks the built artifact against this output
+			// ("embedded: true" proves fetch-deps staged caddy/rathole into
+			// the binary); issue reports quote it for triage.
+			fmt.Printf("gopher %s (caddy %s, rathole %s, embedded: %t)\n",
+				build.Version, build.CaddyVersion, build.RatholeVersion, embedbin.Embedded())
 			return
 		}
 	}

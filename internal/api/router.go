@@ -65,7 +65,10 @@ func NewRouter(
 		r.Post("/auth/setup", authH.Setup)
 		r.Post("/auth/login", authH.Login)
 		r.Post("/auth/login/2fa", authH.LoginTOTP)
-		r.Get("/local/status", localH.Status)
+		// Boolean-only wizard gating; the full /local/status (host IPs, OS
+		// users, ports, SSH pubkey) moved behind auth — it was a free
+		// recon payload on the public dashboard port.
+		r.Get("/local/setup-state", localH.SetupState)
 		r.Post("/local/install", localH.Install)
 		r.Get("/local/logs/ws", logsH.WebSocketDuringSetup)
 		r.Get("/local/check-dns", localH.CheckDNS)
@@ -111,6 +114,7 @@ func NewRouter(
 			r.Post("/bootstrap/token", bootstrapH.GenerateToken)
 
 			r.Route("/local", func(r chi.Router) {
+				r.Get("/status", localH.Status)
 				r.Get("/activity", localH.Activity)
 				r.Post("/reconcile", localH.Reconcile)
 				r.Post("/setup-fail2ban", localH.SetupFail2ban)

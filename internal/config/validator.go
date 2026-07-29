@@ -11,9 +11,20 @@ import (
 var subdomainRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$`)
 
 // ValidateSubdomain checks if a string is a valid subdomain
+// reservedSubdomains are labels gopher provisions for itself. Without this
+// check a tunnel named "router" shadows the dashboard's own router.<domain>
+// Caddy block AND gets matched by the gate proxy's tunnel resolution —
+// locking the operator out of their dashboard with no error anywhere.
+var reservedSubdomains = map[string]bool{
+	"router": true, // dashboard vhost (gopher-router.caddy)
+}
+
 func ValidateSubdomain(s string) error {
 	if !subdomainRegex.MatchString(s) {
 		return fmt.Errorf("invalid subdomain: must be lowercase alphanumeric and hyphens only")
+	}
+	if reservedSubdomains[s] {
+		return fmt.Errorf("subdomain %q is reserved for the gopher dashboard", s)
 	}
 	return nil
 }

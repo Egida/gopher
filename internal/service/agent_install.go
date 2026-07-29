@@ -79,7 +79,7 @@ func (i *AgentInstaller) Install(machineID string) (*MigrateInstructions, error)
 	// /api/bootstrap callback pattern. The token is the only thing that
 	// touches shell history.
 	const migrationTokenTTL = 1 * time.Hour
-	token := shortToken()
+	token := secretToken()
 	if err := db.CreateMigrationToken(token, machine.ID, migrationTokenTTL); err != nil {
 		return nil, fmt.Errorf("create migration token: %w", err)
 	}
@@ -164,11 +164,11 @@ func (i *AgentInstaller) allocateAgentFields(machine *db.Machine) error {
 		dirty = true
 	}
 	if machine.AgentToken == "" {
-		machine.AgentToken = shortToken()
+		machine.AgentToken = secretToken()
 		dirty = true
 	}
 	if machine.AgentRatholeToken == "" {
-		machine.AgentRatholeToken = shortToken()
+		machine.AgentRatholeToken = secretToken()
 		dirty = true
 	}
 	if dirty {

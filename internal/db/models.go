@@ -181,6 +181,10 @@ type MigrationToken struct {
 	MachineID string `gorm:"index"`
 	ExpiresAt time.Time
 	CreatedAt time.Time
+	// UsedAt marks the token consumed: POST /api/migrate hands out the
+	// machine's agent + rathole credentials, so a token must not be
+	// replayable within its TTL. Set atomically by ClaimMigrationToken.
+	UsedAt *time.Time
 }
 
 type AppSettings struct {

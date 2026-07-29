@@ -429,7 +429,15 @@ func (s *AuthService) TOTPEnroll() (secret, qrDataURL string, err error) {
 // secret, persists a new TOTPDevice with the given name, clears the pending
 // slot, and (only if this is the first device) generates backup codes.
 // Returns plaintext backup codes only on first enrollment; nil otherwise.
-func (s *AuthService) TOTPConfirm(code, name string) ([]string, error) {
+//
+// Rate-limited per-IP (shared login bucket): every 2FA-management endpoint
+// that verifies a 6-digit code is a brute-force target for an attacker
+// holding a stolen session cookie — unthrottled, ~1M guesses walks it.
+func (s *AuthService) TOTPConfirm(code, name, ip string) ([]string, error) {
+	if !s.rl.record(ip) {
+		s.logEvent("TOTP_RATE_LIMITED", ip)
+		return nil, fmt.Errorf("too many attempts")
+	}
 	deviceName := strings.TrimSpace(name)
 	if deviceName == "" {
 		deviceName = "Authenticator"
@@ -488,8 +496,13 @@ func (s *AuthService) TOTPConfirm(code, name string) ([]string, error) {
 }
 
 // TOTPDisable removes ALL devices and clears backup codes. Requires a valid
-// code from any device or a backup code.
-func (s *AuthService) TOTPDisable(code string) error {
+// code from any device or a backup code. Rate-limited per-IP — see
+// TOTPConfirm.
+func (s *AuthService) TOTPDisable(code, ip string) error {
+	if !s.rl.record(ip) {
+		s.logEvent("TOTP_RATE_LIMITED", ip)
+		return fmt.Errorf("too many attempts")
+	}
 	return db.MutateSettings(func(settings *db.AppSettings) error {
 		if !settings.TOTPEnabled {
 			return fmt.Errorf("2FA is not enabled")
@@ -511,8 +524,13 @@ func (s *AuthService) TOTPDisable(code string) error {
 // TOTPRemoveDevice removes a single device. Requires a valid code from any
 // enrolled device (including the one being removed — the code authenticates
 // the action, not the device) or a backup code. If this leaves zero devices,
-// 2FA is disabled and backup codes are cleared.
-func (s *AuthService) TOTPRemoveDevice(deviceID, code string) error {
+// 2FA is disabled and backup codes are cleared. Rate-limited per-IP — see
+// TOTPConfirm.
+func (s *AuthService) TOTPRemoveDevice(deviceID, code, ip string) error {
+	if !s.rl.record(ip) {
+		s.logEvent("TOTP_RATE_LIMITED", ip)
+		return fmt.Errorf("too many attempts")
+	}
 	return db.MutateSettings(func(settings *db.AppSettings) error {
 		if !settings.TOTPEnabled {
 			return fmt.Errorf("2FA is not enabled")
@@ -542,7 +560,13 @@ func (s *AuthService) TOTPRemoveDevice(deviceID, code string) error {
 	})
 }
 
-func (s *AuthService) TOTPRegenerateBackupCodes(code string) ([]string, error) {
+// TOTPRegenerateBackupCodes mints a fresh backup-code set after verifying a
+// code. Rate-limited per-IP — see TOTPConfirm.
+func (s *AuthService) TOTPRegenerateBackupCodes(code, ip string) ([]string, error) {
+	if !s.rl.record(ip) {
+		s.logEvent("TOTP_RATE_LIMITED", ip)
+		return nil, fmt.Errorf("too many attempts")
+	}
 	plain, hashed, err := generateBackupCodes()
 	if err != nil {
 		return nil, err
@@ -618,4 +642,3 @@ func generateToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
-

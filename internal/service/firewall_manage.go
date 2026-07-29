@@ -418,9 +418,7 @@ func firewallSaveRules(logWriter io.Writer, sudo []string) error {
 	default: // apt (Debian/Ubuntu)
 		// Install iptables-persistent if the rules file doesn't exist yet.
 		if _, statErr := os.Stat("/etc/iptables/rules.v4"); os.IsNotExist(statErr) {
-			installArgs := append(sudo, "bash", "-c",
-				"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent")
-			if err := runLocalCmd(logWriter, installArgs[0], installArgs[1:]...); err != nil {
+			if err := aptInstallNoninteractive(logWriter, sudo, "iptables-persistent"); err != nil {
 				return fmt.Errorf("install iptables-persistent: %w", err)
 			}
 		}
@@ -433,6 +431,28 @@ func firewallSaveRules(logWriter io.Writer, sudo []string) error {
 		fmt.Fprintln(logWriter, "  Rules saved to /etc/iptables/rules.v4")
 	}
 	return nil
+}
+
+// aptInstallNoninteractive runs `apt-get install -y -qq <pkgs>` with
+// DEBIAN_FRONTEND=noninteractive. sudo's env_reset strips the variable from
+// the process environment, so under sudo it must ride the command line —
+// permitted by the SETENV: tag on the package-manager entry in the bootstrap
+// sudoers (and implied by NOPASSWD:ALL on installed services). As root it
+// just goes in the env. This exists so the narrow sudoers doesn't need to
+// grant bash for a one-off `bash -c "VAR=x apt-get ..."`.
+func aptInstallNoninteractive(logWriter io.Writer, sudo []string, pkgs ...string) error {
+	aptArgs := append([]string{"install", "-y", "-qq"}, pkgs...)
+	var cmd *exec.Cmd
+	if len(sudo) == 0 {
+		cmd = exec.Command("apt-get", aptArgs...) // #nosec G204
+		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+	} else {
+		args := append(append(append([]string{}, sudo[1:]...), "DEBIAN_FRONTEND=noninteractive", "apt-get"), aptArgs...)
+		cmd = exec.Command(sudo[0], args...) // #nosec G204
+	}
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
+	return cmd.Run()
 }
 
 // firewallSaveRules6 persists the ip6tables baseline so it survives reboot.

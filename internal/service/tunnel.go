@@ -282,7 +282,7 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 		Subdomain:            req.Subdomain,
 		LocalPort:            req.LocalPort,
 		RatholePort:          ratholePort,
-		RatholeToken:         shortToken(),
+		RatholeToken:         secretToken(),
 		Protocol:             "tcp",
 		Transport:            transport,
 		NoTLS:                req.NoTLS,

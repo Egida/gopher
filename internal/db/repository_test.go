@@ -636,16 +636,16 @@ func TestSetMachineStatus_OnlyUpdatesStatusAndLastSeen(t *testing.T) {
 func TestSetMachineAgentSeen_FlipsInstalledAndPreservesNonAgentFields(t *testing.T) {
 	initTestDB(t)
 	m := &Machine{
-		ID:                 "m2",
-		Name:               "agent-seen",
-		Status:             "pending",
-		TunnelPort:         1024,
-		RatholeSSHToken:    "ssh-tok",
-		AgentInstalled:     false,
-		AgentRemotePort:    1025,
-		AgentLocalPort:     4322,
-		AgentRatholeToken:  "agent-rt",
-		AgentInstallError:  "previous error",
+		ID:                "m2",
+		Name:              "agent-seen",
+		Status:            "pending",
+		TunnelPort:        1024,
+		RatholeSSHToken:   "ssh-tok",
+		AgentInstalled:    false,
+		AgentRemotePort:   1025,
+		AgentLocalPort:    4322,
+		AgentRatholeToken: "agent-rt",
+		AgentInstallError: "previous error",
 	}
 	if err := CreateMachine(m); err != nil {
 		t.Fatalf("create: %v", err)
@@ -684,5 +684,48 @@ func TestSetMachineAgentSeen_FlipsInstalledAndPreservesNonAgentFields(t *testing
 	}
 	if got.RatholeSSHToken != "ssh-tok" {
 		t.Errorf("RatholeSSHToken was clobbered")
+	}
+}
+
+// ---- Migration tokens -------------------------------------------------------
+
+// POST /api/migrate returns the machine's agent + rathole credentials, so a
+// migration token must be single-use: replayable-within-TTL tokens were a
+// 1-hour credential-disclosure window for anything that saw the token
+// (shell history, a pasted install command).
+func TestMigrationToken_ClaimIsSingleUse(t *testing.T) {
+	initTestDB(t)
+	if err := CreateMigrationToken("mtok", "m1", time.Hour); err != nil {
+		t.Fatalf("CreateMigrationToken: %v", err)
+	}
+	mt, err := ClaimMigrationToken("mtok")
+	if err != nil {
+		t.Fatalf("first claim should succeed: %v", err)
+	}
+	if mt.MachineID != "m1" {
+		t.Errorf("MachineID = %q, want m1", mt.MachineID)
+	}
+	if mt.UsedAt == nil {
+		t.Error("UsedAt should be set after claim")
+	}
+	if _, err := ClaimMigrationToken("mtok"); err == nil {
+		t.Fatal("second claim of the same token should fail")
+	}
+}
+
+func TestMigrationToken_ClaimRejectsExpired(t *testing.T) {
+	initTestDB(t)
+	if err := CreateMigrationToken("mtok", "m1", -time.Hour); err != nil {
+		t.Fatalf("CreateMigrationToken: %v", err)
+	}
+	if _, err := ClaimMigrationToken("mtok"); err == nil {
+		t.Fatal("claim of expired token should fail")
+	}
+}
+
+func TestMigrationToken_ClaimUnknown(t *testing.T) {
+	initTestDB(t)
+	if _, err := ClaimMigrationToken("nope"); err == nil {
+		t.Fatal("claim of unknown token should fail")
 	}
 }

@@ -38,6 +38,17 @@ func (h *LocalHandler) Status(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, status)
 }
 
+// GET /api/local/setup-state — public. The boolean-only wizard-gating subset
+// of Status; everything else about the host now requires a session.
+func (h *LocalHandler) SetupState(w http.ResponseWriter, r *http.Request) {
+	state, err := h.svc.SetupState()
+	if err != nil {
+		response.InternalError(w, err.Error())
+		return
+	}
+	response.Success(w, state)
+}
+
 // POST /api/local/dismiss-custom-services-warning — clears the
 // "user-managed services need manual noise pubkey update" banner. Doesn't
 // touch the underlying service list (operator may want to re-show it later

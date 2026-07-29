@@ -115,6 +115,36 @@ func NewLocalSetupService(hub *LogHub) *LocalSetupService {
 	return &LocalSetupService{hub: hub}
 }
 
+// SetupWizardState is the public (unauthenticated) subset of Status used by
+// the frontend's pre-login wizard gating — booleans only. The full
+// LocalServiceStatus is auth-gated: it carries host_ips, OS users, ports,
+// bind IP and the default SSH public key, which together are a free
+// reconnaissance payload for anything that can reach the dashboard port.
+type SetupWizardState struct {
+	LocalSetupDone     bool `json:"local_setup_done"`
+	FirewallConfigured bool `json:"firewall_configured"`
+	Fail2banSetupDone  bool `json:"fail2ban_setup_done"`
+	SSHKeyConfigured   bool `json:"ssh_key_configured"`
+}
+
+func (s *LocalSetupService) SetupState() (*SetupWizardState, error) {
+	settings, err := db.GetSettings()
+	if err != nil {
+		return nil, err
+	}
+	state := &SetupWizardState{
+		LocalSetupDone:     settings.LocalSetupDone,
+		FirewallConfigured: settings.FirewallMode != "",
+		// Same "installed-and-present OR deliberately skipped" rule as
+		// Status() — keep the two in sync.
+		Fail2banSetupDone: (settings.Fail2banSetupDone && isCommandAvailable("fail2ban-client")) || settings.Fail2banSkipped,
+	}
+	if key, kerr := db.GetDefaultSSHKey(); kerr == nil && key.PublicKey != "" {
+		state.SSHKeyConfigured = true
+	}
+	return state, nil
+}
+
 func (s *LocalSetupService) Status() (*LocalServiceStatus, error) {
 	settings, err := db.GetSettings()
 	if err != nil {

@@ -47,8 +47,9 @@ const (
 type Middleware struct {
 	hmacKey []byte
 
-	authMu   sync.Mutex
-	authFail map[string]*authFailState // per-IP failed password attempts
+	authMu    sync.Mutex
+	authFail  map[string]*authFailState // per-IP failed password attempts
+	authSweep time.Time                 // next expired-entry sweep (see recordAuthFail)
 }
 
 type authFailState struct {
@@ -444,9 +445,21 @@ func (m *Middleware) authThrottled(ip string) bool {
 func (m *Middleware) recordAuthFail(ip string) {
 	m.authMu.Lock()
 	defer m.authMu.Unlock()
+	now := time.Now()
+	// Opportunistic GC: entries were only ever deleted on a successful login,
+	// so distributed failed attempts (each IP failing once) grew the map
+	// forever. Sweep expired windows at most once per window.
+	if now.After(m.authSweep) {
+		for k, v := range m.authFail {
+			if now.After(v.reset) {
+				delete(m.authFail, k)
+			}
+		}
+		m.authSweep = now.Add(authFailWindow)
+	}
 	st := m.authFail[ip]
-	if st == nil || time.Now().After(st.reset) {
-		st = &authFailState{reset: time.Now().Add(authFailWindow)}
+	if st == nil || now.After(st.reset) {
+		st = &authFailState{reset: now.Add(authFailWindow)}
 		m.authFail[ip] = st
 	}
 	st.count++

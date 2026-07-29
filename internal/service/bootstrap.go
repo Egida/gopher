@@ -41,7 +41,7 @@ func (s *BootstrapService) AllowAttempt(ip string) bool {
 func (s *BootstrapService) GenerateToken(tunnelPort int, sshKeyID string, publicSSH, sshEnabled bool) (*db.BootstrapToken, error) {
 	bt := &db.BootstrapToken{
 		ID:         shortToken(),
-		Token:      shortToken(),
+		Token:      secretToken(),
 		ExpiresAt:  time.Now().Add(time.Hour),
 		CreatedAt:  time.Now(),
 		TunnelPort: tunnelPort,
@@ -138,9 +138,9 @@ func (s *BootstrapService) Register(req BootstrapRequest, serverHost string) (*B
 		}
 	}
 
-	ratholeToken := shortToken()
-	agentToken := shortToken()        // bearer token for HTTP auth
-	agentRatholeToken := shortToken() // rathole-tunnel auth (separate)
+	ratholeToken := secretToken()
+	agentToken := secretToken()        // bearer token for HTTP auth
+	agentRatholeToken := secretToken() // rathole-tunnel auth (separate)
 
 	// Allocate ports + create the machine row inside a retry loop. Two
 	// concurrent bootstrap requests can both pick the same port via
@@ -404,6 +404,8 @@ func (s *BootstrapService) awaitAgentReady(machine *db.Machine) {
 
 // shortToken returns 16 random hex characters (8 bytes of entropy).
 // Shorter and easier to read/copy than a UUID while still being unguessable.
+// For record IDs only — anything that authenticates a caller (bootstrap,
+// agent, rathole, migration tokens) must use secretToken instead.
 //
 // Panics on crypto/rand failure — silently returning the zero byte slice
 // would mint deterministic "tokens" that anyone could replay. On Linux
@@ -413,6 +415,19 @@ func shortToken() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		panic(fmt.Sprintf("crypto/rand failure in shortToken: %v", err))
+	}
+	return hex.EncodeToString(b)
+}
+
+// secretToken returns 32 random hex characters (16 bytes / 128 bits of
+// entropy) for credentials: bearer tokens, rathole tokens, bootstrap and
+// migration tokens. 64-bit shortToken values are unguessable for IDs but too
+// thin for credentials on a public endpoint. Existing machines keep the
+// 64-bit tokens they were minted with; rotation is tracked post-release.
+func secretToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand failure in secretToken: %v", err))
 	}
 	return hex.EncodeToString(b)
 }
