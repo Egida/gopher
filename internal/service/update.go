@@ -22,6 +22,10 @@ import (
 
 const githubRepo = "smalex-z/gopher"
 
+// githubAPIBaseURL is a var so tests can point release lookups at an
+// httptest server. Production never changes it.
+var githubAPIBaseURL = "https://api.github.com"
+
 type UpdateService struct{}
 
 type UpdateInfo struct {
@@ -174,6 +178,16 @@ func (s *UpdateService) Apply() error {
 		return fmt.Errorf("failed to chmod update binary: %w", err)
 	}
 
+	// Everything above is pure download + verification; everything below
+	// mutates the system. The split is a test seam: tests stub
+	// installVerifiedBinary so the checksum-gated download path is covered
+	// without a sudo mv over the running binary or a systemd restart.
+	return installVerifiedBinary(tmpPath)
+}
+
+// installVerifiedBinary swaps the checksum-verified binary at tmpPath over the
+// running executable and restarts the service. Test-swappable var — see Apply.
+var installVerifiedBinary = func(tmpPath string) error {
 	// Find current binary path
 	binaryPath, err := os.Executable()
 	if err != nil {
@@ -282,7 +296,7 @@ func releaseMatchesChannel(r *githubRelease, channel string) bool {
 // for beta/alpha it pages through recent releases and filters client-side.
 func fetchLatestReleaseForChannel(channel string) (*githubRelease, error) {
 	if channel == "stable" {
-		url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
+		url := fmt.Sprintf("%s/repos/%s/releases/latest", githubAPIBaseURL, githubRepo)
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("User-Agent", "gopher/"+build.Version)
@@ -305,7 +319,7 @@ func fetchLatestReleaseForChannel(channel string) (*githubRelease, error) {
 	}
 
 	// beta / alpha — fetch list and pick the best matching release
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=30", githubRepo)
+	url := fmt.Sprintf("%s/repos/%s/releases?per_page=30", githubAPIBaseURL, githubRepo)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "gopher/"+build.Version)
@@ -575,4 +589,3 @@ func parseNumericIdentifier(s string) (int, bool) {
 	}
 	return n, true
 }
-

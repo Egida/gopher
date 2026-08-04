@@ -1,0 +1,224 @@
+package service
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/smalex-z/gopher/internal/build"
+	"github.com/smalex-z/gopher/internal/db"
+)
+
+// fakeRelease mirrors the subset of the GitHub release JSON update.go decodes.
+type fakeAsset struct {
+	Name string `json:"name"`
+	URL  string `json:"browser_download_url"`
+}
+type fakeRelease struct {
+	TagName    string      `json:"tag_name"`
+	Prerelease bool        `json:"prerelease"`
+	Draft      bool        `json:"draft"`
+	Assets     []fakeAsset `json:"assets"`
+}
+
+// releaseAssetName is what release.yml actually publishes for this arch —
+// dist/gopher-linux-<arch> hashed as "dist/gopher-linux-<arch>" in
+// SHA256SUMS.txt. The tests pin that naming contract.
+func releaseAssetName() string {
+	return "gopher-linux-" + runtime.GOARCH
+}
+
+// startFakeGitHub serves the two API shapes update.go hits plus asset
+// downloads. binary is the fake release binary; sumsLine the SHA256SUMS.txt
+// body ("" = omit the sums asset entirely).
+func startFakeGitHub(t *testing.T, tag string, prerelease bool, binary []byte, sums string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	release := func() fakeRelease {
+		r := fakeRelease{TagName: tag, Prerelease: prerelease}
+		r.Assets = append(r.Assets, fakeAsset{Name: releaseAssetName(), URL: srv.URL + "/dl/" + releaseAssetName()})
+		if sums != "" {
+			r.Assets = append(r.Assets, fakeAsset{Name: "SHA256SUMS.txt", URL: srv.URL + "/dl/SHA256SUMS.txt"})
+		}
+		return r
+	}
+	mux.HandleFunc("/repos/smalex-z/gopher/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, release())
+	})
+	mux.HandleFunc("/repos/smalex-z/gopher/releases", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, []fakeRelease{release()})
+	})
+	mux.HandleFunc("/dl/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "SHA256SUMS.txt"):
+			fmt.Fprint(w, sums)
+		default:
+			_, _ = w.Write(binary)
+		}
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Errorf("encode fake release: %v", err)
+	}
+}
+
+// pointUpdatesAt redirects the GitHub base URL and the running version for
+// one test, restoring both after.
+func pointUpdatesAt(t *testing.T, srv *httptest.Server, version string) {
+	t.Helper()
+	origURL, origVer := githubAPIBaseURL, build.Version
+	githubAPIBaseURL, build.Version = srv.URL, version
+	t.Cleanup(func() { githubAPIBaseURL, build.Version = origURL, origVer })
+}
+
+func setChannel(t *testing.T, channel string) {
+	t.Helper()
+	if err := db.MutateSettings(func(s *db.AppSettings) error {
+		s.UpdateChannel = channel
+		return nil
+	}); err != nil {
+		t.Fatalf("set channel: %v", err)
+	}
+}
+
+func TestUpdateCheck_StableChannel(t *testing.T) {
+	initTestDB(t)
+	srv := startFakeGitHub(t, "v0.2.0", false, []byte("bin"), "irrelevant")
+	pointUpdatesAt(t, srv, "v0.1.0")
+	setChannel(t, "stable")
+
+	info, err := NewUpdateService().Check()
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if info.LatestVersion != "v0.2.0" || !info.UpdateAvailable {
+		t.Errorf("Check = %+v, want latest v0.2.0 available", info)
+	}
+}
+
+func TestUpdateCheck_BetaChannelViaList(t *testing.T) {
+	initTestDB(t)
+	srv := startFakeGitHub(t, "v0.1.0-beta.19", true, []byte("bin"), "irrelevant")
+	pointUpdatesAt(t, srv, "v0.1.0-beta.18")
+	setChannel(t, "beta")
+
+	info, err := NewUpdateService().Check()
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if info.LatestVersion != "v0.1.0-beta.19" || !info.UpdateAvailable {
+		t.Errorf("Check = %+v, want beta.19 available", info)
+	}
+}
+
+// The exact asset names release.yml publishes must stay resolvable —
+// renaming an asset in the release pipeline should fail HERE, not in
+// production dashboards that silently stop updating.
+func TestReleaseAssetNamingContract(t *testing.T) {
+	var r githubRelease
+	blob := `{
+		"tag_name": "v0.1.0",
+		"assets": [
+			{"name": "gopher-linux-amd64", "browser_download_url": "https://x/gopher-linux-amd64"},
+			{"name": "gopher-linux-arm64", "browser_download_url": "https://x/gopher-linux-arm64"},
+			{"name": "SHA256SUMS.txt", "browser_download_url": "https://x/SHA256SUMS.txt"}
+		]
+	}`
+	if err := json.Unmarshal([]byte(blob), &r); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got := findAssetURL(&r); got != "https://x/"+releaseAssetName() {
+		t.Errorf("findAssetURL = %q, want the %s asset", got, releaseAssetName())
+	}
+	if got := findChecksumsURL(&r); got != "https://x/SHA256SUMS.txt" {
+		t.Errorf("findChecksumsURL = %q, want the SHA256SUMS.txt asset", got)
+	}
+}
+
+func TestUpdateApply_RefusesWithoutChecksums(t *testing.T) {
+	initTestDB(t)
+	srv := startFakeGitHub(t, "v0.2.0", false, []byte("bin"), "")
+	pointUpdatesAt(t, srv, "v0.1.0")
+	setChannel(t, "stable")
+
+	origInstall := installVerifiedBinary
+	installVerifiedBinary = func(string) error {
+		t.Error("installVerifiedBinary must not run without a SHA256SUMS asset")
+		return nil
+	}
+	t.Cleanup(func() { installVerifiedBinary = origInstall })
+
+	err := NewUpdateService().Apply()
+	if err == nil || !strings.Contains(err.Error(), "SHA256SUMS") {
+		t.Fatalf("Apply = %v, want refusal naming SHA256SUMS", err)
+	}
+}
+
+func TestUpdateApply_ChecksumMismatchAborts(t *testing.T) {
+	initTestDB(t)
+	sums := fmt.Sprintf("%064d  dist/%s\n", 0, releaseAssetName())
+	srv := startFakeGitHub(t, "v0.2.0", false, []byte("real binary bytes"), sums)
+	pointUpdatesAt(t, srv, "v0.1.0")
+	setChannel(t, "stable")
+
+	origInstall := installVerifiedBinary
+	installVerifiedBinary = func(tmpPath string) error {
+		t.Error("installVerifiedBinary must not run on checksum mismatch")
+		os.Remove(tmpPath)
+		return nil
+	}
+	t.Cleanup(func() { installVerifiedBinary = origInstall })
+
+	err := NewUpdateService().Apply()
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("Apply = %v, want checksum-mismatch refusal", err)
+	}
+}
+
+func TestUpdateApply_VerifiedDownloadReachesInstall(t *testing.T) {
+	initTestDB(t)
+	binary := []byte("the new gopher binary")
+	sum := sha256.Sum256(binary)
+	// Same two-column, dist/-prefixed layout release.yml's sha256sum step emits.
+	sums := hex.EncodeToString(sum[:]) + "  dist/" + releaseAssetName() + "\n"
+	srv := startFakeGitHub(t, "v0.2.0", false, binary, sums)
+	pointUpdatesAt(t, srv, "v0.1.0")
+	setChannel(t, "stable")
+
+	var installed string
+	origInstall := installVerifiedBinary
+	installVerifiedBinary = func(tmpPath string) error {
+		got, err := os.ReadFile(tmpPath)
+		if err != nil {
+			t.Errorf("read verified tmp: %v", err)
+		} else if string(got) != string(binary) {
+			t.Errorf("verified tmp content mismatch (%d bytes)", len(got))
+		}
+		installed = tmpPath
+		return os.Remove(tmpPath)
+	}
+	t.Cleanup(func() { installVerifiedBinary = origInstall })
+
+	if err := NewUpdateService().Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if installed == "" {
+		t.Fatal("installVerifiedBinary was never invoked for a verified download")
+	}
+}
