@@ -292,6 +292,21 @@ func SetTunnelStatus(id, status string) error {
 	return err
 }
 
+// SetTunnelCaddyPending flips the provisioning flag without touching the
+// rest of the row (same partial-update rationale as SetTunnelStatus). The
+// clear fires a status notification so dashboards drop the "provisioning"
+// presentation promptly instead of waiting out their poll interval.
+func SetTunnelCaddyPending(id string, pending bool) error {
+	err := DB.Model(&Tunnel{}).Where("id = ?", id).Updates(map[string]any{
+		"caddy_pending": pending,
+		"updated_at":    time.Now(),
+	}).Error
+	if err == nil && !pending {
+		notifyStatusChange("tunnel", id, "provisioning", currentTunnelStatus(id))
+	}
+	return err
+}
+
 func DeleteTunnel(id string) error {
 	err := DB.Delete(&Tunnel{}, "id = ?", id).Error
 	if err == nil {

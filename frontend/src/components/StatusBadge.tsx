@@ -10,7 +10,7 @@ export default function StatusBadge({ status, className = '' }: Props) {
   if (s === 'active') color = 'bg-green-500'
   else if (s === 'connected') color = 'bg-teal-500'
   else if (s === 'idle') color = 'bg-amber-400'
-  else if (s === 'pending' || s === 'connecting') color = 'bg-yellow-500'
+  else if (s === 'pending' || s === 'connecting' || s === 'provisioning') color = 'bg-yellow-500'
   else if (s === 'inactive' || s === 'disconnected') color = 'bg-gray-400'
   else if (s === 'offline' || s === 'failed' || s === 'error' || s.startsWith('config-error')) color = 'bg-red-500'
 

@@ -86,6 +86,9 @@ func (s *TunnelService) List() ([]db.Tunnel, error) {
 	if err != nil {
 		return nil, err
 	}
+	for i := range tunnels {
+		presentTunnelStatus(&tunnels[i])
+	}
 	machines, err := db.GetMachines()
 	if err != nil {
 		return nil, err
@@ -145,7 +148,12 @@ func (s *TunnelService) ListByMachine(machineID string) ([]db.Tunnel, error) {
 }
 
 func (s *TunnelService) Get(id string) (*db.Tunnel, error) {
-	return db.GetTunnel(id)
+	t, err := db.GetTunnel(id)
+	if err != nil {
+		return nil, err
+	}
+	presentTunnelStatus(t)
+	return t, nil
 }
 
 // Probe runs a live connectivity check on the tunnel and returns one of
@@ -330,6 +338,9 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 			})
 		} else {
 			log.Printf("tunnel create: config push succeeded for tunnel %s", tunnel.ID)
+			// Rathole binds before Caddy serves the URL (reload applied +
+			// cert issued) — present "provisioning" until verified (#93).
+			beginCaddyVerification(tunnel, settings.Domain)
 		}
 	} else if machErr != nil {
 		log.Printf("tunnel create: could not load machine %s: %v — skipping config push", req.MachineID, machErr)
@@ -478,6 +489,10 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 			// rewrite replaces the old subdomain's block in place.
 			if err := s.local.WriteServiceTunnelCaddy(tunnel); err != nil {
 				log.Printf("tunnel update: rewrite caddy block for %s: %v", tunnel.ID, err)
+			} else if settings, sErr := db.GetSettings(); sErr == nil {
+				// A new fqdn needs its own certificate — same provisioning
+				// window as create (#93).
+				beginCaddyVerification(tunnel, settings.Domain)
 			}
 		}
 	}

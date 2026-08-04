@@ -204,6 +204,23 @@ func (s *MonitorService) checkTunnel(t db.Tunnel) {
 	status := s.debounceOffline(t.ID, tunnelStatus(t))
 	latency := int(time.Since(start) / time.Millisecond)
 
+	// Provisioning fallback (#93): the create-time verifier normally clears
+	// CaddyPending within seconds, but it dies with the process — after a
+	// restart or a >90s certificate stall this is what un-sticks the flag.
+	if t.CaddyPending {
+		if settings, err := db.GetSettings(); err == nil && tunnelHasHTTPRoute(&t, settings.Domain) {
+			if caddyRouteServing(t.Subdomain+"."+settings.Domain, t.NoTLS, settings.BindIP) {
+				if err := db.SetTunnelCaddyPending(t.ID, false); err != nil {
+					log.Printf("monitor: clear caddy-pending for %s: %v", t.ID, err)
+				}
+			}
+		} else if err == nil {
+			// Route no longer exists (subdomain cleared, domain removed) —
+			// nothing to verify; don't present provisioning forever.
+			_ = db.SetTunnelCaddyPending(t.ID, false)
+		}
+	}
+
 	// Partial Update — see SetTunnelStatus godoc. Avoids the race where
 	// the monitor's stale snapshot of the row would otherwise revert a
 	// concurrent operator edit on next save.

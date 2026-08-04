@@ -351,7 +351,8 @@ export default function TunnelsPage() {
                               <Info size={12} className="text-gray-400 cursor-help" />
                               <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 w-72 bg-gray-900 text-white text-xs rounded-lg px-3 py-2 hidden group-hover:block z-50 shadow-lg pointer-events-none font-normal normal-case tracking-normal text-left">
                                 <p className="mb-1.5 text-gray-300">gopher passes real traffic through the tunnel's server port, then asks the origin's agent whether the local port is actually listening.</p>
-                                <p><span className="text-green-300 font-semibold">Active</span> — traffic reached the service and it responded; the whole path works.</p>
+                                <p><span className="text-yellow-300 font-semibold">Provisioning</span> — tunnel created; waiting for the edge to serve the URL (TLS certificate issuance, usually under a minute).</p>
+                                <p className="mt-1"><span className="text-green-300 font-semibold">Active</span> — traffic reached the service and it responded; the whole path works.</p>
                                 <p className="mt-1"><span className="text-teal-300 font-semibold">Connected</span> — tunnel up and the port is listening, but the service didn't answer the probe (normal for speak-first apps like SSH, MySQL, Minecraft).</p>
                                 <p className="mt-1"><span className="text-amber-300 font-semibold">Idle</span> — tunnel up, but nothing is listening on the origin's local port.</p>
                                 <p className="mt-1"><span className="text-red-300 font-semibold">Offline</span> — the tunnel path is down (server port unreachable, or the machine is offline).</p>

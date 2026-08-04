@@ -112,6 +112,7 @@ export interface Tunnel {
   auth_allow_ip?: string           // JSON array of CIDR/IP strings
   tls_skip_verify?: boolean        // skip upstream TLS cert verification (e.g. Proxmox)
   status: string
+  caddy_pending?: boolean          // true while the URL is provisioning (status shows "provisioning")
   managed?: boolean
   kind?: string
   created_at: string

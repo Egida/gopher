@@ -137,12 +137,19 @@ type Tunnel struct {
 	AuthAllowIP      string `json:"auth_allow_ip"` // JSON array of CIDR/IP strings that bypass the gate
 	// TLSSkipVerify disables upstream TLS certificate verification in Caddy.
 	// Use for backends with self-signed certs (e.g. Proxmox, some NAS devices).
-	TLSSkipVerify bool      `json:"tls_skip_verify"`
-	Status        string    `json:"status"`
-	Managed       bool      `json:"managed,omitempty" gorm:"-"`
-	Kind          string    `json:"kind,omitempty" gorm:"-"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	TLSSkipVerify bool   `json:"tls_skip_verify"`
+	Status        string `json:"status"`
+	// CaddyPending is true from tunnel create / subdomain change until a
+	// local probe confirms Caddy is actually serving the route (config
+	// applied AND a certificate is available for the SNI). While set, the
+	// API presents status "provisioning" instead of the rathole-path status:
+	// the rathole port binds seconds before the public URL stops throwing
+	// TLS alerts (issue #93), and "active but TLS-broken" reads as a lie.
+	CaddyPending bool      `json:"caddy_pending"`
+	Managed      bool      `json:"managed,omitempty" gorm:"-"`
+	Kind         string    `json:"kind,omitempty" gorm:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // AfterFind computes AuthPasswordSet on every DB read so the UI can tell whether
