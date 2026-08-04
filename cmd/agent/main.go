@@ -341,10 +341,10 @@ func rootDiskSpace() (free, total uint64, err error) {
 // The agent runs as the gopher user (set in bootstrap), and bootstrap chowns
 // the client.toml to that user, so direct file I/O works without sudo.
 
-const (
-	clientTomlPath        = paths.RatholeClientConfig
-	maxRatholeConfigBytes = 1 << 20 // 1 MiB — generous but bounded
-)
+// clientTomlPath aliases a paths var (test-redirectable), so it is a var too.
+var clientTomlPath = paths.RatholeClientConfig
+
+const maxRatholeConfigBytes = 1 << 20 // 1 MiB — generous but bounded
 
 // availableBytes returns the number of bytes free for non-root writes in dir,
 // or (0, false) if the syscall isn't supported. Hoisted into a var so tests

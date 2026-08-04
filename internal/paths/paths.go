@@ -15,7 +15,9 @@
 // backup is "tar two dirs" and uninstall is "stop one service, rm two trees".
 package paths
 
-const (
+// These are vars, not consts, ONLY so tests (layout migration, install) can
+// redirect the trees to a temp dir. Production code must never assign to them.
+var (
 	// Root is the install dir for the gopher binary and the bin/ subdir that
 	// holds the child binaries extracted from the embedded bundle at startup.
 	Root   = "/opt/gopher"
@@ -32,7 +34,7 @@ const (
 )
 
 // Extracted child binaries.
-const (
+var (
 	CaddyBin   = BinDir + "/caddy"
 	RatholeBin = BinDir + "/rathole"
 )
@@ -46,7 +48,7 @@ const (
 const ManagedKeyMarker = "gopher-managed"
 
 // Generated config files and dirs.
-const (
+var (
 	CaddyfilePath = ConfigDir + "/caddy/Caddyfile"
 	CaddyConfDir  = ConfigDir + "/caddy/conf.d"
 	RatholeDir    = ConfigDir + "/rathole"
@@ -60,7 +62,7 @@ const (
 // rathole/ dir with the edge's server.toml; the agent's env gets its own
 // agent/ dir. The agent migrates an existing origin onto these on its first
 // post-upgrade boot (see cmd/agent migrate).
-const (
+var (
 	RatholeClientConfig = RatholeDir + "/client.toml"
 	RatholeVPSKey       = RatholeDir + "/vps_key.pub"
 	AgentDir            = ConfigDir + "/agent"
@@ -68,7 +70,7 @@ const (
 )
 
 // Persistent state.
-const (
+var (
 	DBPath = StateDir + "/gopher.db"
 	// CaddyData is set as Caddy's XDG_DATA_HOME so its ACME certs and data live
 	// under the gopher state tree instead of /var/lib/caddy.
@@ -77,7 +79,7 @@ const (
 
 // Legacy locations from the pre-consolidation layout, kept so the migration
 // step can detect and move an existing install. Nothing should write to these.
-const (
+var (
 	LegacyRatholeConfig = "/etc/rathole/server.toml"
 	LegacyRatholeBin    = "/usr/local/bin/rathole"
 	LegacyCaddyfile     = "/etc/caddy/Caddyfile"

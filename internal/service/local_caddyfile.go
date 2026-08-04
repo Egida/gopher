@@ -10,9 +10,13 @@ import (
 	"github.com/smalex-z/gopher/internal/paths"
 )
 
+// The path aliases follow paths' vars (test-redirectable), so they are vars.
+var (
+	caddyConfigPath = paths.CaddyfilePath
+	caddyManagedDir = paths.CaddyConfDir
+)
+
 const (
-	caddyConfigPath      = paths.CaddyfilePath
-	caddyManagedDir      = paths.CaddyConfDir
 	caddyCustomBeginMark = "# ===== BEGIN CUSTOM CONFIGURATION ====="
 	caddyCustomEndMark   = "# ===== END CUSTOM CONFIGURATION ====="
 )

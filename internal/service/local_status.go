@@ -856,7 +856,11 @@ func sudoMkdir(path string) error {
 // stdin so sudo password prompts work correctly.
 // For sudo commands, we connect to the real terminal directly to allow password prompts.
 // Args are all hardcoded constants — no user input reaches this function.
-func runLocalCmd(logWriter io.Writer, name string, args ...string) error {
+//
+// Var, not func: tests of code that shells out under sudo (the layout
+// migration's systemctl/pkill/chown sequence) swap in an interceptor — a test
+// suite must never actually pkill rathole on the host running it.
+var runLocalCmd = func(logWriter io.Writer, name string, args ...string) error {
 	cmd := exec.Command(name, args...) // #nosec G204
 	cmd.Stdout = logWriter
 	cmd.Stderr = logWriter
