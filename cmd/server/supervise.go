@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	osuser "os/user"
+	"strings"
 
 	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/embedbin"
@@ -56,6 +59,17 @@ func startBundledChildren() (*supervisor.Supervisor, error) {
 		return nil, nil
 	}
 
+	// A box whose /opt/gopher predates the current install convention (never
+	// went through gopher install's chownRecursive, or was hand-set-up long
+	// ago) has BinDir's parent owned root:root — gopher can read/exec into
+	// it but can't create bin/ itself. That's not a one-off: it's the exact
+	// same "state gopher assumes but was never actually put in place" class
+	// as the GOPHER_MANAGED gap, just for a directory instead of an env var.
+	// Fix it here, every start, the same sudo any gopher install already
+	// has everywhere — not a manual chown someone has to SSH in for.
+	if err := ensureDirWritableBySelf(paths.BinDir); err != nil {
+		return nil, fmt.Errorf("ensure %s is writable: %w", paths.BinDir, err)
+	}
 	if err := embedbin.ExtractAll(paths.BinDir, embedbin.RunBundle()); err != nil {
 		return nil, err
 	}
@@ -71,8 +85,14 @@ func startBundledChildren() (*supervisor.Supervisor, error) {
 			Path: paths.CaddyBin,
 			Args: []string{"run", "--config", paths.CaddyfilePath, "--adapter", "caddyfile"},
 			// Caddy stores ACME certs/data under $XDG_DATA_HOME/caddy, keeping
-			// them in /var/lib/gopher/caddy (= paths.CaddyData).
-			Env: []string{"XDG_DATA_HOME=" + paths.StateDir},
+			// them in /var/lib/gopher/caddy (= paths.CaddyData). Also pin
+			// XDG_CONFIG_HOME here: unset, Caddy's config-autosave falls
+			// back to $HOME/.config (= paths.Root/.config on this user),
+			// which hits the exact same not-actually-owned-by-gopher wall as
+			// BinDir above on an unmigrated box — redirecting it into
+			// StateDir (already proven writable; it's where certs live)
+			// avoids the failure instead of needing its own chown fix.
+			Env: []string{"XDG_DATA_HOME=" + paths.StateDir, "XDG_CONFIG_HOME=" + paths.StateDir},
 		},
 		supervisor.Spec{
 			Name: "rathole",
@@ -83,4 +103,27 @@ func startBundledChildren() (*supervisor.Supervisor, error) {
 	log.Printf("supervisor: starting bundled caddy %s + rathole %s as children", build.CaddyVersion, build.RatholeVersion)
 	sup.Start(context.Background())
 	return sup, nil
+}
+
+// ensureDirWritableBySelf makes dir exist and be owned by the current user,
+// escalating via sudo only if the plain attempt fails. The fast path costs
+// nothing on every normal start (a fresh gopher install already chowns this
+// tree — cmd/server/install.go's chownRecursive); the sudo fallback is what
+// makes a box that skipped that step (or predates it entirely) self-heal
+// instead of failing startup and needing a manual chown.
+func ensureDirWritableBySelf(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err == nil {
+		return nil
+	}
+	u, err := osuser.Current()
+	if err != nil {
+		return fmt.Errorf("resolve current user: %w", err)
+	}
+	if out, err := exec.Command("sudo", "-n", "mkdir", "-p", dir).CombinedOutput(); err != nil { // #nosec G204 — fixed args
+		return fmt.Errorf("sudo mkdir -p %s: %w (%s)", dir, err, strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("sudo", "-n", "chown", u.Username+":"+u.Username, dir).CombinedOutput(); err != nil { // #nosec G204 — fixed args
+		return fmt.Errorf("sudo chown %s %s: %w (%s)", u.Username, dir, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
