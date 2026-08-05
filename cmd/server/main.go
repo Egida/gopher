@@ -81,6 +81,10 @@ func runServer(args []string) {
 		if err := ensurePasswordlessSudoForCurrentUser(); err != nil {
 			log.Printf("Warning: could not configure passwordless sudo automatically: %v", err)
 		}
+		// State-based, not tied to which release is doing the updating —
+		// see EnsureManagedModeAtStartup for why Apply()'s own patch can't
+		// cover every way a box reaches a fixed version.
+		service.EnsureManagedModeAtStartup()
 	}
 
 	if p, err := strconv.Atoi(*port); err == nil {
