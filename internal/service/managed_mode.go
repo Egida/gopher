@@ -36,6 +36,20 @@ func EnsureManagedModeAtStartup() {
 	if !embedbin.Embedded() || os.Getenv("GOPHER_MANAGED") == "1" {
 		return
 	}
+	ensureManagedModeAtStartup()
+}
+
+// ensureManagedModeAtStartup is the actual marker/patch/restart logic, split
+// out so tests can exercise it without depending on embedbin.Embedded() —
+// that's only true when scripts/fetch-deps.sh has staged real binaries into
+// internal/embedbin/bin/ first, which plain `go test` (as CI's Go Unit Tests
+// job runs it) never does. A test asserting on this function's behavior
+// while gated behind Embedded() passes or fails based on whether the
+// repo happens to have staged binaries lying around — exactly the gap that
+// let TestEnsureManagedModeAtStartup_DoesNotRetryAfterMarkerExists pass in a
+// local dev checkout for the wrong reason (short-circuited on Embedded(),
+// not on the marker check it claimed to test) while failing in CI.
+func ensureManagedModeAtStartup() {
 	if _, err := os.Stat(managedModeHealMarker); err == nil {
 		// Already tried once and it didn't stick — an unconditional retry
 		// would turn a host where the patch can never succeed (no sudo,

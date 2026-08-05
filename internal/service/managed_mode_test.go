@@ -36,7 +36,6 @@ func TestEnsureManagedModeAtStartup_NoOpWhenAlreadyManaged(t *testing.T) {
 }
 
 func TestEnsureManagedModeAtStartup_PatchesUnitAndWritesMarkerOnce(t *testing.T) {
-	t.Setenv("GOPHER_MANAGED", "")
 	dir := t.TempDir()
 
 	unitPath := filepath.Join(dir, "gopher.service")
@@ -50,7 +49,11 @@ func TestEnsureManagedModeAtStartup_PatchesUnitAndWritesMarkerOnce(t *testing.T)
 
 	withSudoStub(t, dir)
 
-	EnsureManagedModeAtStartup()
+	// Calls the ungated helper directly — embedbin.Embedded() depends on
+	// scripts/fetch-deps.sh having staged real binaries, which plain `go
+	// test` never does; gating this test on it would make it pass or fail
+	// based on repo state instead of the marker/patch logic being tested.
+	ensureManagedModeAtStartup()
 
 	got, err := os.ReadFile(unitPath)
 	if err != nil {
@@ -65,7 +68,6 @@ func TestEnsureManagedModeAtStartup_PatchesUnitAndWritesMarkerOnce(t *testing.T)
 }
 
 func TestEnsureManagedModeAtStartup_DoesNotRetryAfterMarkerExists(t *testing.T) {
-	t.Setenv("GOPHER_MANAGED", "")
 	dir := t.TempDir()
 
 	unitPath := filepath.Join(dir, "gopher.service")
@@ -86,7 +88,8 @@ func TestEnsureManagedModeAtStartup_DoesNotRetryAfterMarkerExists(t *testing.T) 
 		t.Fatalf("seed marker: %v", err)
 	}
 
-	EnsureManagedModeAtStartup()
+	// Ungated helper — see the comment on the previous test for why.
+	ensureManagedModeAtStartup()
 
 	got, err := os.ReadFile(unitPath)
 	if err != nil {
