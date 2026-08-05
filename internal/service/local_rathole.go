@@ -35,21 +35,7 @@ func (s *LocalSetupService) ReconcileServerConfig() error {
 	}
 
 	content := string(existing)
-
-	// Extract the user-owned custom section.
-	userBody := ""
-	if bIdx := strings.Index(content, beginMarker); bIdx != -1 {
-		below := content[bIdx+len(beginMarker):]
-		if eIdx := strings.Index(below, endMarker); eIdx != -1 {
-			userBody = below[:eIdx]
-		} else {
-			userBody = below
-		}
-	}
-
-	// Strip any gopher-managed entries that old versions may have placed inside
-	// the custom section, then normalise whitespace.
-	userBody = strings.TrimSpace(stripGopherServiceSections(userBody))
+	userBody := extractCustomBody(content, beginMarker, endMarker)
 
 	machines, err := db.GetMachines()
 	if err != nil {
@@ -106,6 +92,51 @@ func (s *LocalSetupService) ReconcileServerConfig() error {
 	return nil
 }
 
+// legacyCustomMarkers pairs older wordings of the custom-section banner with
+// the current one. The wrapper text has changed at least once across
+// released versions; a reconcile that only recognises the CURRENT literal
+// string treats a file using older wording as having NO custom section at
+// all — silently dropping any user-added entries (e.g. a hand-added
+// `[server.services.x]` block) on the next rewrite. extractCustomBody falls
+// back through this list so old installs keep their custom content; the
+// caller then re-writes the file under the current marker, which
+// self-heals the convention on this same reconcile pass.
+var legacyCustomMarkers = []struct{ begin, end string }{
+	{"# Add your own rathole service entries here. Gopher will not modify this section.", ""},
+}
+
+// extractCustomBody pulls the user-owned custom section out of an existing
+// server.toml. Tries the current marker first, then falls back through
+// legacyCustomMarkers so a config file predating a marker-wording change
+// doesn't lose its custom content — see legacyCustomMarkers for why this
+// matters. Returns "" (nothing to preserve) only when no marker, current or
+// legacy, is found at all.
+func extractCustomBody(content, beginMarker, endMarker string) string {
+	if bIdx := strings.Index(content, beginMarker); bIdx != -1 {
+		below := content[bIdx+len(beginMarker):]
+		body := below
+		if eIdx := strings.Index(below, endMarker); eIdx != -1 {
+			body = below[:eIdx]
+		}
+		return strings.TrimSpace(stripGopherServiceSections(body))
+	}
+	for _, m := range legacyCustomMarkers {
+		bIdx := strings.Index(content, m.begin)
+		if bIdx == -1 {
+			continue
+		}
+		below := content[bIdx+len(m.begin):]
+		body := below
+		if m.end != "" {
+			if eIdx := strings.Index(below, m.end); eIdx != -1 {
+				body = below[:eIdx]
+			}
+		}
+		return strings.TrimSpace(stripGopherServiceSections(body))
+	}
+	return ""
+}
+
 // stripGopherServiceSections removes only marker-delimited Gopher-managed
 // blocks (between # gopher-*-start: / # gopher-*-end: lines) from a TOML
 // string. Used to clean legacy entries that were incorrectly placed inside the
@@ -117,11 +148,13 @@ func stripGopherServiceSections(content string) string {
 	for _, line := range strings.Split(content, "\n") {
 		stripped := strings.TrimSpace(line)
 		if strings.HasPrefix(stripped, "# gopher-machine-start:") ||
+			strings.HasPrefix(stripped, "# gopher-machine-agent-start:") ||
 			strings.HasPrefix(stripped, "# gopher-tunnel-start:") {
 			skip = true
 			continue
 		}
 		if strings.HasPrefix(stripped, "# gopher-machine-end:") ||
+			strings.HasPrefix(stripped, "# gopher-machine-agent-end:") ||
 			strings.HasPrefix(stripped, "# gopher-tunnel-end:") {
 			skip = false
 			continue

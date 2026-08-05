@@ -18,6 +18,7 @@ import (
 
 	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/db"
+	"github.com/smalex-z/gopher/internal/embedbin"
 )
 
 const githubRepo = "smalex-z/gopher"
@@ -209,6 +210,29 @@ var installVerifiedBinary = func(tmpPath string) error {
 		log.Printf("WARN: could not patch sudoers: %v", err)
 	}
 
+	// Ensure the systemd unit carries GOPHER_MANAGED=1. `gopher install`
+	// writes this unconditionally (buildServiceUnit), but self-update never
+	// touched the unit file at all — any install that predates the embedded
+	// caddy/rathole supervisor (i.e. every pre-v0.1.0 beta) upgrades its
+	// binary here without ever gaining the env var. The new binary still
+	// unconditionally writes config to /etc/gopher/... (paths.ConfigDir has
+	// no such gate), but without GOPHER_MANAGED it never runs the
+	// legacy-layout migration or supervises caddy/rathole — so a
+	// pre-existing rathole-server/caddy.service unit keeps running forever
+	// against the OLD config paths gopher no longer writes to. Existing
+	// tunnels (already baked into the old file) keep working, masking the
+	// break completely; every NEW machine/tunnel silently never connects —
+	// registration succeeds, the client gets "no such service", and nothing
+	// anywhere logs an error. Failures here are non-fatal for the same
+	// reason as patchSudoers: don't block the binary swap over it, but this
+	// one is worth escalating past a log line since a silent no-op leaves
+	// the install in exactly the broken state this exists to fix.
+	if embedbin.Embedded() {
+		if err := patchSystemdManagedEnv(); err != nil {
+			log.Printf("WARN: could not enable managed mode on the systemd unit (new tunnels/machines may not connect until this is fixed manually): %v", err)
+		}
+	}
+
 	// Refresh fail2ban filter files so new jails/filters from this release are
 	// picked up. Only runs if fail2ban is installed and active.
 	if isCommandAvailable("fail2ban-client") {
@@ -254,6 +278,59 @@ func patchSudoers() error {
 		return fmt.Errorf("chmod sudoers: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// systemdUnitPath is a var so tests can redirect it to a tempfile.
+var systemdUnitPath = "/etc/systemd/system/gopher.service"
+
+// patchSystemdManagedEnv ensures the gopher systemd unit's [Service] section
+// carries Environment=GOPHER_MANAGED=1, then daemon-reloads so the pending
+// restart (scheduled by the caller) picks it up. No-ops if already present —
+// safe to call on every Apply().
+func patchSystemdManagedEnv() error {
+	content, err := os.ReadFile(systemdUnitPath)
+	if err != nil {
+		return fmt.Errorf("read unit file: %w", err)
+	}
+	patched, changed := ensureManagedEnvLine(string(content))
+	if !changed {
+		return nil
+	}
+
+	cmd := exec.Command("sudo", "-n", "tee", systemdUnitPath) // #nosec G204
+	cmd.Stdin = strings.NewReader(patched)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("write unit file: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command("sudo", "-n", "systemctl", "daemon-reload").CombinedOutput(); err != nil { // #nosec G204
+		return fmt.Errorf("daemon-reload: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// ensureManagedEnvLine inserts "Environment=GOPHER_MANAGED=1" into a systemd
+// unit's [Service] section if no GOPHER_MANAGED assignment exists yet. Pure
+// string transform — no filesystem/sudo — so the insertion logic is testable
+// independent of patchSystemdManagedEnv's I/O.
+func ensureManagedEnvLine(unit string) (result string, changed bool) {
+	if strings.Contains(unit, "GOPHER_MANAGED=") {
+		return unit, false
+	}
+	idx := strings.Index(unit, "[Service]")
+	if idx == -1 {
+		// Not a unit we understand well enough to patch safely; leave it alone
+		// rather than guess where to insert.
+		return unit, false
+	}
+	insertAt := idx + len("[Service]")
+	// Land right after the section header's newline, ahead of the existing
+	// directives, rather than fussing over exact placement among them.
+	nl := strings.Index(unit[insertAt:], "\n")
+	if nl == -1 {
+		return unit, false
+	}
+	insertAt += nl + 1
+	return unit[:insertAt] + "Environment=GOPHER_MANAGED=1\n" + unit[insertAt:], true
 }
 
 // buildServiceSudoers returns the sudoers content for the service user. We

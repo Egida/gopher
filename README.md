@@ -479,12 +479,7 @@ If you find Gopher useful, please consider starring those projects too.
 
 ## Contributing
 
-Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md), the
-[open issues](https://github.com/smalex-z/gopher/issues), and
-[SECURITY.md](SECURITY.md) for reporting vulnerabilities.
-
-For local development, `./scripts/dev.sh` runs both ends with hot reload (frontend on
-`:5173`, backend on `:4321`); `./scripts/build.sh` produces the release binary.
+Issues and PRs welcome. See [open issues](https://github.com/smalex-z/gopher/issues).
 
 Areas that would help most:
 - Testing on different distros and VPS providers
