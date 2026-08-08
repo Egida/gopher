@@ -149,22 +149,6 @@ export default function TunnelsPage() {
     return () => { cancelled = true }
   }, [searchParams])
 
-  // Debounced server-port availability check. Only while adding (not editing —
-  // rathole_port isn't editable) and for an in-range port. Re-runs as the port
-  // changes; the stale-guard prevents an old response from clobbering a newer one.
-  useEffect(() => {
-    if (!modal.isOpen || modal.editTunnel) { setPortCheck(null); return }
-    const port = form.rathole_port
-    if (!port || port < 1024 || port > 65535) { setPortCheck(null); return }
-    let cancelled = false
-    const timer = setTimeout(() => {
-      tunnelsApi.checkPort(port)
-        .then(res => { if (!cancelled) setPortCheck({ port, available: res.available, reason: res.reason }) })
-        .catch(() => { if (!cancelled) setPortCheck(null) })
-    }, 350)
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [form.rathole_port, modal.isOpen, modal.editTunnel])
-
   const createMutation = useMutation({
     mutationFn: (d: Partial<FormState>) => tunnelsApi.create(d),
     onSuccess: () => {
@@ -174,6 +158,29 @@ export default function TunnelsPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  // Debounced server-port availability check. Only while adding (not editing —
+  // rathole_port isn't editable) and for an in-range port. Re-runs as the port
+  // changes; the stale-guard prevents an old response from clobbering a newer one.
+  //
+  // Also stops once the create mutation is in flight: Create() commits the
+  // tunnel's DB row (claiming the port) before pushing client.toml to the
+  // origin and reloading Caddy — real network I/O that can easily outlast
+  // this 350ms debounce. Without this guard, a check fires mid-submission,
+  // correctly sees the port as taken (by this very submission), and flashes
+  // "port in use" a moment before the create's own success response arrives.
+  useEffect(() => {
+    if (!modal.isOpen || modal.editTunnel || createMutation.isPending) { setPortCheck(null); return }
+    const port = form.rathole_port
+    if (!port || port < 1024 || port > 65535) { setPortCheck(null); return }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      tunnelsApi.checkPort(port)
+        .then(res => { if (!cancelled) setPortCheck({ port, available: res.available, reason: res.reason }) })
+        .catch(() => { if (!cancelled) setPortCheck(null) })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [form.rathole_port, modal.isOpen, modal.editTunnel, createMutation.isPending])
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => tunnelsApi.delete(id),
