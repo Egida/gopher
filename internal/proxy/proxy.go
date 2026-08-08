@@ -8,6 +8,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -256,8 +257,30 @@ func (m *Middleware) forward(w http.ResponseWriter, r *http.Request, tunnel *db.
 		bindIP = settings.BindIP
 	}
 	ratholeHost := ratholeUpstreamHost(tunnel.Private, bindIP)
-	target, _ := url.Parse(fmt.Sprintf("http://%s:%d", ratholeHost, tunnel.RatholePort))
+	// Mirrors buildTunnelCaddyBlock's tlsSkipVerify && !noTLS condition. Gated
+	// tunnels (bot protection and/or password auth) route through here
+	// instead of Caddy's own reverse_proxy directive — which is where a
+	// self-signed-upstream tunnel normally gets its tls_insecure_skip_verify
+	// transport (local_caddyfile.go:93-95 documents that this path doesn't
+	// apply once gating is on). Without this, TLS-skip-verify was silently
+	// dropped the moment gating was enabled: gates would pass, then the final
+	// hop to the upstream broke because this proxy always spoke plain HTTP to
+	// a TLS-only backend — Proxmox-style backends that issue their own
+	// http-to-https redirect on a bare HTTP hit turn that into an infinite
+	// redirect loop, right after the password gate succeeds.
+	scheme := "http"
+	if tunnel.TLSSkipVerify && !tunnel.NoTLS {
+		scheme = "https"
+	}
+	target, _ := url.Parse(fmt.Sprintf("%s://%s:%d", scheme, ratholeHost, tunnel.RatholePort))
 	rp := httputil.NewSingleHostReverseProxy(target)
+	if scheme == "https" {
+		rp.Transport = &http.Transport{
+			// #nosec G402 -- operator opted into this for a known self-signed
+			// upstream (e.g. Proxmox); mirrors Caddy's tls_insecure_skip_verify.
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
 	rp.Director = func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
