@@ -184,29 +184,88 @@ func repairRatholeConfig(path string) bool {
 // tunnel. So the agent — which stays up independently — periodically repairs the
 // config and resurrects a down unit. This is exactly the failure that took a
 // machine offline: a duplicate table rathole choked on at startup.
+//
+// It also covers a second, sneakier failure: rathole's own reconnect loop can
+// wedge after a heartbeat timeout / data-channel failure burst — the process
+// never exits, so systemd still reports "active" and Restart=always never
+// fires, but it stops making any progress and never reconnects on its own
+// even once the network is fine again. That happened for real: heartbeat
+// timeout → control channel shutdown → a burst of failed reconnect attempts
+// → total silence for 11+ hours while `systemctl status` looked healthy the
+// whole time. wedgedSilentTicks tracks consecutive misses of the one signal
+// a genuinely healthy client always has — a live established connection to
+// the edge — and force-restarts once that's been absent long enough to rule
+// out a normal in-flight reconnect.
 func ratholeRecoveryLoop(unit string) {
-	recoverRatholeOnce(unit)
+	silentTicks := 0
+	recoverRatholeOnce(unit, &silentTicks)
 	t := time.NewTicker(60 * time.Second)
 	defer t.Stop()
 	for range t.C {
-		recoverRatholeOnce(unit)
+		recoverRatholeOnce(unit, &silentTicks)
 	}
 }
 
-func recoverRatholeOnce(unit string) {
+// wedgedSilentTicks is how many consecutive recoverRatholeOnce calls (at the
+// loop's 60s cadence) may find zero established connections before the unit
+// is treated as wedged and force-restarted. A real reconnect after a dropped
+// control channel lands well inside one tick; requiring several consecutive
+// misses avoids restarting a client that's mid-retry on a slow network.
+const wedgedSilentTicks = 3
+
+func recoverRatholeOnce(unit string, silentTicks *int) {
 	_ = repairRatholeConfig(activeClientTomlPath())
 
-	if active, _ := unitActive(unit); active {
+	active, _ := unitActive(unit)
+	if !active {
+		*silentTicks = 0
+		// Unit is down. Clear any failed-state burst counter, then start (not
+		// restart — start is a no-op on a healthy unit and never flaps live tunnels).
+		_ = sudo("systemctl", "reset-failed", unit)
+		if err := sudo("systemctl", "start", unit); err != nil {
+			log.Printf("rathole recovery: start %s failed: %v", unit, err)
+			return
+		}
+		log.Printf("rathole recovery: started %s (was down)", unit)
 		return
 	}
-	// Unit is down. Clear any failed-state burst counter, then start (not
-	// restart — start is a no-op on a healthy unit and never flaps live tunnels).
-	_ = sudo("systemctl", "reset-failed", unit)
-	if err := sudo("systemctl", "start", unit); err != nil {
-		log.Printf("rathole recovery: start %s failed: %v", unit, err)
+
+	if hasEstablishedConnection(unit) {
+		*silentTicks = 0
 		return
 	}
-	log.Printf("rathole recovery: started %s (was down)", unit)
+	*silentTicks++
+	if *silentTicks < wedgedSilentTicks {
+		return
+	}
+	*silentTicks = 0
+	// Active per systemd but no established connection for several minutes
+	// straight — wedged, not merely reconnecting. `start` would be a no-op
+	// here (systemd already thinks it's running); only `restart` kills and
+	// relaunches the stuck process.
+	if err := sudo("systemctl", "restart", unit); err != nil {
+		log.Printf("rathole recovery: restart %s failed (wedged, no established connection for %d checks): %v", unit, wedgedSilentTicks, err)
+		return
+	}
+	log.Printf("rathole recovery: restarted %s — active but had no established connection for %d consecutive checks (wedged)", unit, wedgedSilentTicks)
+}
+
+// hasEstablishedConnection reports whether unit's main process currently
+// holds at least one ESTABLISHED TCP connection. A healthy rathole-client
+// keeps its control channel open continuously; the instant that drops it
+// should be actively reconnecting. A measurement failure (ss unavailable,
+// PID lookup failure) returns true — don't restart a possibly-healthy
+// process just because this specific check couldn't run.
+func hasEstablishedConnection(unit string) bool {
+	pid := runProp(unit, "MainPID")
+	if pid == "" || pid == "0" || pid == "unknown" {
+		return true
+	}
+	out, err := runCommand("sudo", "-n", "ss", "-tnp", "state", "established") // #nosec G204 — fixed argv
+	if err != nil {
+		return true
+	}
+	return strings.Contains(out, "pid="+pid+",")
 }
 
 // dedupeTomlTables removes duplicate `[table]` definitions, keeping the first
