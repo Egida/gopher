@@ -56,7 +56,14 @@ const (
 	// ports are bound (from /proc/net), giving the server a definitive
 	// idle-vs-serving signal it can't get by probing the rathole port (needed
 	// for UDP tunnels, cleaner for TCP). Additive — protocolVersion unchanged.
-	agentVersion = "0.2.3"
+	// 0.2.4: rathole-client watchdog — recoverRatholeOnce now detects "active
+	// but wedged" (systemd reports the unit running, but its reconnect loop
+	// silently died with zero established connections) via hasEstablishedConnection,
+	// not just unitActive(). Purely local behavior change, no RPC surface touched
+	// — protocolVersion unchanged. This bump IS the fix: without it the server's
+	// targetAgentVersion comparison never trips and this build never gets pushed
+	// to already-bootstrapped machines.
+	agentVersion = "0.2.4"
 
 	// protocolVersion is the wire-compatibility contract between server and
 	// agent. The server gates compatibility on this integer, NOT on the semver
