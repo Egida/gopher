@@ -96,6 +96,16 @@ type Machine struct {
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 	Tunnels           []Tunnel  `json:"tunnels,omitempty" gorm:"foreignKey:MachineID"`
+	// SSHTunnelStatus/AgentTunnelStatus are the same active/inactive/pending
+	// vocabulary the Tunnels page shows for these machines' synthetic
+	// machine-ssh/machine-agent rows (see machineTunnelStatus/agentTunnelStatus
+	// in tunnel.go), populated here too so the Machines page's expanded SSH/
+	// Agent rows can't drift from the Tunnels page's labels for the identical
+	// underlying tunnel. Status remains the machine's own reachability
+	// ("connected"/"offline"/"pending") — a distinct concept, deliberately
+	// left alone.
+	SSHTunnelStatus   string `json:"ssh_tunnel_status,omitempty" gorm:"-"`
+	AgentTunnelStatus string `json:"agent_tunnel_status,omitempty" gorm:"-"`
 }
 
 // HealthCheck records the result of a single agent or tunnel probe. Used by

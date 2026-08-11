@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Network, ChevronDown, ChevronRight, ClipboardCopy, ArrowRight, Globe, Lock, Info, AlertTriangle, Pencil, Plus, Search, Shield, Trash2, Zap } from 'lucide-react'
@@ -62,11 +62,21 @@ export default function TunnelsPage() {
   // catches ports held by a process (rathole's 2333, Caddy, the dashboard) that
   // the client-side DB check can't see, and blocks Create before submit.
   const [portCheck, setPortCheck] = useState<{ port: number; available: boolean; reason: string } | null>(null)
+  // Ports openAddModal / the deep-link effect already got from nextPort() —
+  // the backend's own allocator — so the debounced check below can skip
+  // re-verifying them until the operator actually changes the value. A ref,
+  // not state: it must be readable inside the debounce effect without being
+  // a dependency (adding portCheck itself there would re-fire the effect
+  // every time a check resolves, looping forever whenever a port turns out
+  // unavailable).
+  const verifiedPortRef = useRef<number | null>(null)
 
   const openAddModal = async (machineId?: string) => {
     setNextPortLoading(true)
     try {
       const port = await tunnelsApi.nextPort()
+      verifiedPortRef.current = port
+      setPortCheck({ port, available: true, reason: '' })
       setForm({ ...defaultForm, rathole_port: port, machine_id: machineId ?? '' })
     } catch {
       setForm({ ...defaultForm, machine_id: machineId ?? '' })
@@ -136,6 +146,8 @@ export default function TunnelsPage() {
     tunnelsApi.nextPort()
       .then(port => {
         if (cancelled) return
+        verifiedPortRef.current = port
+        setPortCheck({ port, available: true, reason: '' })
         setForm({ ...defaultForm, rathole_port: port, machine_id: machineId })
       })
       .catch(() => {
@@ -169,10 +181,19 @@ export default function TunnelsPage() {
   // this 350ms debounce. Without this guard, a check fires mid-submission,
   // correctly sees the port as taken (by this very submission), and flashes
   // "port in use" a moment before the create's own success response arrives.
+  //
+  // Also skips re-checking a port openAddModal/the deep-link effect already
+  // marked available: both prefill rathole_port from nextPort(), the
+  // backend's own allocator, which means this effect would otherwise fire on
+  // *every* add — re-asking about a port the server just said was free,
+  // seconds earlier. That redundant round-trip can only ever repeat "yes,
+  // still free" or flash a spurious conflict on the operator's own suggested
+  // port; it never carries new information unless the operator changes it.
   useEffect(() => {
     if (!modal.isOpen || modal.editTunnel || createMutation.isPending) { setPortCheck(null); return }
     const port = form.rathole_port
     if (!port || port < 1024 || port > 65535) { setPortCheck(null); return }
+    if (verifiedPortRef.current === port) return
     let cancelled = false
     const timer = setTimeout(() => {
       tunnelsApi.checkPort(port)

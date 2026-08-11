@@ -613,7 +613,7 @@ export default function MachinesPage() {
                                         <Lock size={9} /> Private
                                       </span>
                                     )}
-                                    <StatusBadge status={m.status} />
+                                    <StatusBadge status={m.ssh_tunnel_status ?? m.status} />
                                   </div>
                                 </div>
                               )
@@ -631,7 +631,7 @@ export default function MachinesPage() {
                                   <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                                     <Lock size={9} /> Private
                                   </span>
-                                  <StatusBadge status={m.agent_installed ? m.status : 'pending'} />
+                                  <StatusBadge status={m.agent_tunnel_status ?? (m.agent_installed ? m.status : 'pending')} />
                                 </div>
                               </div>
                             ) : null}
