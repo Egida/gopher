@@ -87,6 +87,9 @@ func firewallTakeover(logWriter io.Writer) error {
 	if err := firewallInitRules(logWriter, sudo); err != nil {
 		return err
 	}
+	fmt.Fprintln(logWriter, "  NOTE: on a cloud VPS (OCI, AWS, etc.) TCP 80/443/2333 must also be")
+	fmt.Fprintln(logWriter, "  opened in the provider's own firewall (e.g. OCI VCN Security List) —")
+	fmt.Fprintln(logWriter, "  that's a separate layer in front of the OS that Gopher cannot manage.")
 
 	// Step 3b: Mirror the same default-deny baseline onto IPv6 (best-effort) so
 	// IPv4 restrictions don't silently leak over IPv6 on a dual-stack host.

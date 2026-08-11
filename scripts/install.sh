@@ -66,9 +66,14 @@ if [ -n "$PINNED" ]; then
   echo "→ Using pinned version: $TAG"
 elif [ "$PRERELEASE" = true ]; then
   echo "→ Fetching release info from GitHub..."
-  # Latest release of any kind (includes pre-releases)
-  TAG=$(fetch "https://api.github.com/repos/${REPO}/releases" \
-    | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  # Latest release of any kind (includes pre-releases). per_page=1 limits the
+  # response to a single release object, so a plain grep (no -m1) can't race
+  # curl's write with an early pipe close — piping into `grep -m1`/`head -n1`
+  # here intermittently killed curl with "curl: (23) Failure writing output
+  # to destination" (SIGPIPE from the reader exiting before curl finished
+  # writing the full multi-release response).
+  TAG=$(fetch "https://api.github.com/repos/${REPO}/releases?per_page=1" \
+    | grep '"tag_name"' | cut -d'"' -f4)
   echo "  Using latest pre-release: $TAG"
 else
   echo "→ Fetching release info from GitHub..."
@@ -131,3 +136,8 @@ echo ""
 echo "Next steps:"
 echo "  sudo gopher install   # install as a systemd service"
 echo "  gopher                # or run directly"
+echo ""
+echo "On a cloud VPS (OCI, AWS, etc.), also open TCP 80/443/2333 in the"
+echo "provider's own firewall (VCN Security List on OCI, Security Group on"
+echo "AWS) — that's a separate layer in front of the OS and Gopher can't"
+echo "manage it. See: https://github.com/${REPO}#cloud-level-firewall--security-groups"
