@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/db"
 )
 
@@ -103,10 +104,14 @@ type AgentUpgrader interface {
 	UpgradeAgent(machine *db.Machine) error
 }
 
-// targetAgentVersion is the agent version this server expects; bump it in
-// lockstep with cmd/agent's agentVersion. A reachable agent reporting an older
-// version is auto-upgraded.
-const targetAgentVersion = "0.2.4"
+// targetAgentVersion is the agent version this server expects. Aliased to
+// build.AgentVersion — the same constant cmd/agent reports as its own
+// version — rather than a second copy: a real incident shipped an agent-side
+// fix without bumping a duplicate of this value, so this exact comparison
+// saw "0.2.3 == 0.2.3" and never pushed the fix to any already-bootstrapped
+// machine. A reachable agent reporting anything older than this is
+// auto-upgraded.
+const targetAgentVersion = build.AgentVersion
 
 // Auto-upgrade pacing. The retry interval per machine starts short and backs
 // off on each successive failed attempt, so an upgrade that's merely in-flight

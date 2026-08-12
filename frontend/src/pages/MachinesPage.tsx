@@ -402,7 +402,16 @@ export default function MachinesPage() {
                           // action left is a first-time INSTALL on an agentless machine —
                           // there's no agent there yet to update itself. Offline machines
                           // report their last-known version (the outdated flag may be stale).
-                          const reachable = m.status === 'connected' || m.status === 'degraded'
+                          // Was `m.status === 'connected' || m.status === 'degraded'` — the
+                          // backend never actually writes "degraded" to Machine.Status
+                          // (SetMachineAgentDegraded sets "offline"), so that branch was dead
+                          // code and this silently collapsed to "agent info is live only when
+                          // the WHOLE machine is connected." agent_tunnel_status answers the
+                          // narrower, correct question (is the agent channel itself reachable,
+                          // via AgentLastSeen freshness) independently of general connectivity —
+                          // exactly the degraded case (agent up, rathole/SSH down) this was
+                          // originally meant to cover.
+                          const reachable = m.agent_tunnel_status === 'active'
                           const showInstall = !m.agent_installed
                           const updating = m.agent_installed && m.agent_outdated && reachable
                           if (showInstall) {
@@ -613,7 +622,7 @@ export default function MachinesPage() {
                                         <Lock size={9} /> Private
                                       </span>
                                     )}
-                                    <StatusBadge status={m.status} />
+                                    <StatusBadge status={m.ssh_tunnel_status ?? m.status} />
                                   </div>
                                 </div>
                               )
@@ -631,7 +640,7 @@ export default function MachinesPage() {
                                   <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                                     <Lock size={9} /> Private
                                   </span>
-                                  <StatusBadge status={m.agent_installed ? m.status : 'pending'} />
+                                  <StatusBadge status={m.agent_tunnel_status ?? (m.agent_installed ? m.status : 'pending')} />
                                 </div>
                               </div>
                             ) : null}

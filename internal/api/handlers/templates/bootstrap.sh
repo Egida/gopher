@@ -174,12 +174,33 @@ else
     exit 1
   fi
   echo "Installing server SSH key to authorized_keys..."
-  mkdir -p ~/.ssh
+  # This whole block used to have no error checking at all — if mkdir/touch
+  # failed (read-only/quota-full/permission-restricted $HOME), every step
+  # after it silently no-op'd or failed too, and the script sailed on to
+  # "Bootstrap complete!" with the SSH back-channel never actually installed
+  # and no error pointing at why.
+  if ! mkdir -p ~/.ssh; then
+    echo "ERROR: could not create ~/.ssh — the SSH back-channel will not work. Aborting."
+    exit 1
+  fi
   chmod 700 ~/.ssh
-  touch ~/.ssh/authorized_keys
+  if ! touch ~/.ssh/authorized_keys; then
+    echo "ERROR: could not create ~/.ssh/authorized_keys. Aborting."
+    exit 1
+  fi
   chmod 600 ~/.ssh/authorized_keys
   MANAGED_LINE=$(printf '%s\n' "$VPS_PUBLIC_KEY" | awk 'NF>=2 {print $1, $2, "gopher-managed"; exit}')
-  grep -v ' gopher-managed[[:space:]]*$' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp 2>/dev/null || true
+  # `grep -v` exiting 1 just means every line matched the exclusion (or the
+  # file's empty, e.g. right after the touch above) — normal, not an error.
+  # What we must NOT do is treat a genuine read failure the same way: that
+  # would silently truncate authorized_keys to just the new managed line,
+  # dropping any of the operator's own keys already in it. Check readability
+  # directly instead of trusting grep's exit code to tell them apart.
+  if [ ! -r ~/.ssh/authorized_keys ]; then
+    echo "ERROR: ~/.ssh/authorized_keys exists but isn't readable — aborting rather than risk overwriting it."
+    exit 1
+  fi
+  grep -v ' gopher-managed[[:space:]]*$' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp 2>/dev/null
   printf '%s\n' "$MANAGED_LINE" >> ~/.ssh/authorized_keys.tmp
   mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys
   chmod 600 ~/.ssh/authorized_keys
@@ -213,7 +234,18 @@ if ! command -v rathole &>/dev/null && [ ! -f "$HOME/.local/bin/rathole" ]; then
     fi
     echo "  rathole checksum verified"
   fi
-  $SUDO install -m 0755 /tmp/rathole-dl /usr/local/bin/rathole
+  # Was unchecked — every other privileged write below this point (mkdir,
+  # tee, systemctl) already bails via handle_sudo_failure, but this one
+  # didn't, so a failed install here (disk full, unusual /usr/local/bin
+  # permissions) still went on to enable+start a systemd unit whose
+  # ExecStart points at a binary that was never actually placed —
+  # `systemctl restart` reports success (it just queues the start job), the
+  # script prints "Bootstrap complete!", and the machine never tunnels.
+  if ! $SUDO install -m 0755 /tmp/rathole-dl /usr/local/bin/rathole; then
+    echo "ERROR: could not install rathole binary to /usr/local/bin (sudo/permission/disk issue?)"
+    rm -f /tmp/rathole-dl
+    exit 1
+  fi
   RATHOLE_BIN=/usr/local/bin/rathole
   rm -f /tmp/rathole-dl
 else

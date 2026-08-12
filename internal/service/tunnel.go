@@ -341,12 +341,55 @@ func (s *TunnelService) Create(req dto.CreateTunnelRequest) (*db.Tunnel, error) 
 			// Rathole binds before Caddy serves the URL (reload applied +
 			// cert issued) — present "provisioning" until verified (#93).
 			beginCaddyVerification(tunnel, settings.Domain)
+			// The "inactive" placeholder set above otherwise sits untouched
+			// until MonitorService's own 30s ticker happens to fall due, plus
+			// the dashboard's own poll interval on top — up to ~45s showing
+			// "inactive" with nothing actually wrong. Poll tightly right after
+			// creation so the real status lands as soon as the client's
+			// rathole-client has had a moment to bring the new service up.
+			go goSafe("awaitTunnelReady", func() { awaitTunnelReady(tunnel.ID) })
 		}
 	} else if machErr != nil {
 		log.Printf("tunnel create: could not load machine %s: %v — skipping config push", req.MachineID, machErr)
 	}
 
 	return tunnel, nil
+}
+
+const (
+	tunnelReadyPoll    = 2 * time.Second
+	tunnelReadyTimeout = 20 * time.Second
+)
+
+// awaitTunnelReady polls a freshly created tunnel's real status shortly after
+// creation, rather than leaving the "inactive" placeholder set in Create()
+// to sit until MonitorService's own 30s ticker happens to fall due — see the
+// call site in Create() for why that gap matters (up to ~45s of a stale
+// "inactive" badge with nothing wrong). Stops as soon as a definitive status
+// is observed; MonitorService's normal 30s cycle (with its own
+// offline-debounce) takes over from there regardless of whether this ever
+// fires — this is purely a latency improvement, not a new source of truth.
+func awaitTunnelReady(tunnelID string) {
+	deadline := time.Now().Add(tunnelReadyTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(tunnelReadyPoll)
+		t, err := db.GetTunnel(tunnelID)
+		if err != nil {
+			return // deleted before it ever came up
+		}
+		status := tunnelStatus(*t)
+		if status == "inactive" || status == "offline" {
+			// Not up yet, or still ambiguous this early — a lone "offline"
+			// read moments after creation is expected (the client hasn't
+			// necessarily finished bringing the new service channel up yet)
+			// and shouldn't be persisted here; MonitorService's own
+			// 2-consecutive-reads debounce is the right place for a real
+			// offline determination.
+			continue
+		}
+		_ = db.SetTunnelStatus(tunnelID, status)
+		return
+	}
 }
 
 func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunnel, error) {
@@ -446,7 +489,16 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 		if err := s.local.ReconcileServerConfig(); err != nil {
 			log.Printf("tunnel update: reconcile failed: %v", err)
 		}
-		ApplyTunnelPort(tunnel.RatholePort, tunnel.Transport, tunnel.Private)
+		// Firewall failures used to be silently swallowed (ApplyTunnelPort was
+		// void) — this is specifically the "make this private" security-tightening
+		// action, so a failure here means the port may still be reachable despite
+		// the badge already saying Private. Surface it the same way a config-push
+		// failure is surfaced on create: a visible config-error status, not just
+		// a server log line nobody's watching.
+		if ferr := ApplyTunnelPort(tunnel.RatholePort, tunnel.Transport, tunnel.Private); ferr != nil {
+			tunnel.Status = fmt.Sprintf("config-error: firewall: %v", ferr)
+			_ = db.UpdateTunnel(tunnel)
+		}
 		// The Caddy upstream depends on privacy (private → localhost, public →
 		// bind_ip), and on a bind_ip host the existing block is now stale. The
 		// subdomain itself didn't change, so rewrite it here. No-ops without a

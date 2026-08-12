@@ -37,13 +37,16 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	agentpb "github.com/smalex-z/gopher/internal/agentpb"
+	"github.com/smalex-z/gopher/internal/build"
 	"github.com/smalex-z/gopher/internal/paths"
 )
 
 const (
-	// agentVersion is the agent build version. It is bumped manually and is
-	// intentionally independent of the server's tag-injected version.
+	// agentVersion is the agent build version, aliased to build.AgentVersion —
+	// see that constant's doc for why this is a single shared value rather
+	// than a second copy that has to be bumped in lockstep by hand.
 	//
+	// Per-version changelog:
 	// 0.2.1: consolidate origin config under /etc/gopher (client.toml +
 	// config.env), migrated in place on first boot.
 	// 0.2.2: add GetNetworkInfo + SetManagedKey RPCs so the server no longer
@@ -60,10 +63,8 @@ const (
 	// but wedged" (systemd reports the unit running, but its reconnect loop
 	// silently died with zero established connections) via hasEstablishedConnection,
 	// not just unitActive(). Purely local behavior change, no RPC surface touched
-	// — protocolVersion unchanged. This bump IS the fix: without it the server's
-	// targetAgentVersion comparison never trips and this build never gets pushed
-	// to already-bootstrapped machines.
-	agentVersion = "0.2.4"
+	// — protocolVersion unchanged.
+	agentVersion = build.AgentVersion
 
 	// protocolVersion is the wire-compatibility contract between server and
 	// agent. The server gates compatibility on this integer, NOT on the semver

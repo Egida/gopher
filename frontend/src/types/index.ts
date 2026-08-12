@@ -42,6 +42,14 @@ export interface Machine {
   created_at: string
   updated_at: string
   tunnels?: Tunnel[]
+  // Same active/inactive/pending vocabulary the Tunnels page shows for this
+  // machine's built-in SSH/agent tunnels — use these (not `status`) when
+  // labeling those specific rows, so they can't disagree with the Tunnels
+  // page for the identical underlying tunnel. `status` itself stays the
+  // machine's own reachability ("connected"/"offline"/"pending"), a
+  // different concept.
+  ssh_tunnel_status?: string
+  agent_tunnel_status?: string
 }
 
 export interface HealthCheck {

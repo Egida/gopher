@@ -23,11 +23,33 @@ func NewMachineService(deploy *DeployService, local localOps) *MachineService {
 }
 
 func (s *MachineService) List() ([]db.Machine, error) {
-	return db.GetMachines()
+	machines, err := db.GetMachines()
+	if err != nil {
+		return nil, err
+	}
+	for i := range machines {
+		annotateTunnelStatuses(&machines[i])
+	}
+	return machines, nil
 }
 
 func (s *MachineService) Get(id string) (*db.Machine, error) {
-	return db.GetMachine(id)
+	machine, err := db.GetMachine(id)
+	if err != nil {
+		return nil, err
+	}
+	annotateTunnelStatuses(machine)
+	return machine, nil
+}
+
+// annotateTunnelStatuses fills SSHTunnelStatus/AgentTunnelStatus using the
+// exact same functions the Tunnels page's synthetic machine-ssh/machine-agent
+// rows are built from (tunnel.go), so a machine's built-in tunnels can't show
+// one status on the Tunnels page and a different one on the Machines page for
+// the identical underlying state.
+func annotateTunnelStatuses(m *db.Machine) {
+	m.SSHTunnelStatus = machineTunnelStatus(m.Status)
+	m.AgentTunnelStatus = agentTunnelStatus(m)
 }
 
 func (s *MachineService) Create(req dto.CreateMachineRequest) (*db.Machine, error) {

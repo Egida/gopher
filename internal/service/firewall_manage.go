@@ -493,30 +493,67 @@ func firewallSaveRules6(logWriter io.Writer, sudo []string) {
 // ApplyTunnelPort opens or restricts a firewall port for a tunnel when in Gopher-managed mode.
 // Private tunnels are restricted to localhost (127.0.0.1) via iptablesMakePrivate.
 // Errors are non-fatal — tunnel creation is not blocked by firewall state.
-func ApplyTunnelPort(port int, transport string, private bool) {
+// ApplyTunnelPort returns an error on failure (in addition to logging and
+// recording a persistent event) — see recordFirewallFailure's doc comment for
+// why this matters. Most callers still treat the error as non-fatal (the
+// tunnel/machine row itself is more important to keep than to roll back over
+// a firewall hiccup) but MUST at least check it so the failure isn't silently
+// dropped on the floor the way it used to be.
+func ApplyTunnelPort(port int, transport string, private bool) error {
 	settings, err := db.GetSettings()
 	if err != nil || settings.FirewallMode != "gopher" {
-		return
+		return nil
 	}
 	if !firewallChainExists() {
-		return
+		return nil
 	}
 	proto := transport
 	if proto == "" {
 		proto = "tcp"
 	}
+	action := "open"
+	if private {
+		action = "restrict"
+	}
 	if private {
 		if err := iptablesMakePrivate(port, proto); err != nil {
-			log.Printf("firewall: could not restrict port %d/%s: %v", port, proto, err)
-			return
+			return recordFirewallFailure(port, proto, action, err)
 		}
 	} else {
 		if err := iptablesOpenPort(port, proto); err != nil {
-			log.Printf("firewall: could not open port %d/%s: %v", port, proto, err)
-			return
+			return recordFirewallFailure(port, proto, action, err)
 		}
 	}
 	persistRules()
+	return nil
+}
+
+// recordFirewallFailure logs AND persists a firewall_apply_failed event.
+//
+// Found in a QA sweep: ApplyTunnelPort/RevokeTunnelPort/ApplyDashboardPort/
+// ApplyPublicSSHPort were void functions — a failure only ever reached
+// log.Printf, never the caller, never the DB. Combined with there being no
+// periodic firewall reconciliation loop anywhere (only a one-shot check at
+// server startup), a failed rule application had NO path to visibility or
+// self-healing: a tunnel meant to be private could stay open, or one meant to
+// be open could stay closed, until an operator noticed something was wrong by
+// other means (or a restart happened to paper over it) and re-ran firewall
+// setup by hand. This doesn't add automatic re-reconciliation (a firewall
+// drift-repair loop deserves its own dedicated design, not a bolt-on here) —
+// it makes the failure impossible to miss on the Events/Security page instead
+// of invisible.
+func recordFirewallFailure(port int, proto, action string, cause error) error {
+	err := fmt.Errorf("firewall: could not %s port %d/%s: %w", action, port, proto, cause)
+	log.Print(err)
+	db.RecordEvent(&db.Event{
+		Severity:     "error",
+		Source:       "firewall",
+		Kind:         "firewall_apply_failed",
+		ResourceType: "port",
+		ResourceID:   strconv.Itoa(port),
+		Message:      err.Error(),
+	})
+	return err
 }
 
 // ApplyPublicSSHPort opens a publicly-exposed SSH tunnel port with edge-side
@@ -525,46 +562,50 @@ func ApplyTunnelPort(port int, transport string, private bool) {
 // 127.0.0.1), so origin-side fail2ban can't work — the edge is the only place
 // that sees the attacker's IP and can throttle brute force. No-op unless gopher
 // manages the firewall.
-func ApplyPublicSSHPort(port int) {
+func ApplyPublicSSHPort(port int) error {
 	settings, err := db.GetSettings()
 	if err != nil || settings.FirewallMode != "gopher" {
-		return
+		return nil
 	}
 	if !firewallChainExists() {
-		return
+		return nil
 	}
 	if err := iptablesOpenPortRateLimited(port, "tcp"); err != nil {
-		log.Printf("firewall: could not open public SSH port %d: %v", port, err)
-		return
+		return recordFirewallFailure(port, "tcp", "open (rate-limited)", err)
 	}
 	persistRules()
+	return nil
 }
 
 // ApplyDashboardPort opens or restricts the dashboard port based on the
 // DashboardPrivate setting. No-op if not in Gopher-managed firewall mode.
-func ApplyDashboardPort(private bool) {
+func ApplyDashboardPort(private bool) error {
 	settings, err := db.GetSettings()
 	if err != nil || settings.FirewallMode != "gopher" {
-		return
+		return nil
 	}
 	if !firewallChainExists() {
-		return
+		return nil
 	}
 	if private {
 		if err := iptablesMakePrivate(dashboardPort, "tcp"); err != nil {
-			log.Printf("firewall: could not restrict dashboard port %d: %v", dashboardPort, err)
-			return
+			return recordFirewallFailure(dashboardPort, "tcp", "restrict", err)
 		}
 	} else {
 		if err := iptablesOpenPort(dashboardPort, "tcp"); err != nil {
-			log.Printf("firewall: could not open dashboard port %d: %v", dashboardPort, err)
-			return
+			return recordFirewallFailure(dashboardPort, "tcp", "open", err)
 		}
 	}
 	persistRules()
+	return nil
 }
 
 // RevokeTunnelPort removes the firewall rule for a deleted tunnel.
+// iptablesClosePort's own deletes are already idempotent best-effort (missing
+// rules are not an error), so there's nothing to surface here beyond what it
+// already logs internally — this stays void deliberately, unlike the Apply*
+// functions above where "did the open/restrict actually take" is the whole
+// point of the call.
 func RevokeTunnelPort(port int, transport string) {
 	settings, err := db.GetSettings()
 	if err != nil || settings.FirewallMode != "gopher" {

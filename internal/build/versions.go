@@ -20,6 +20,21 @@ const (
 
 	// RatholeRepo is the GitHub repo rathole releases are fetched from.
 	RatholeRepo = "rathole-org/rathole"
+
+	// AgentVersion is the gopher-agent build version. It is the single source
+	// of truth for both cmd/agent (what the running agent reports) and
+	// internal/service/health.go's targetAgentVersion (what the edge expects
+	// — a reachable agent reporting anything older gets auto-upgraded).
+	// Previously these were two separately-maintained constants that had to be
+	// bumped in lockstep by hand; a real incident shipped a agent-side fix
+	// without bumping either, so the edge's version comparison saw no change
+	// and never pushed the fix to any already-bootstrapped machine, with zero
+	// error signal. Collapsing them to one constant makes that class of bug
+	// structurally impossible rather than relying on a human remembering.
+	//
+	// Bump this whenever cmd/agent's behavior changes in a way the edge should
+	// know about (see cmd/agent/main.go's per-version changelog comment).
+	AgentVersion = "0.2.4"
 )
 
 // InjectVersions substitutes the pinned-version placeholder tokens in an install

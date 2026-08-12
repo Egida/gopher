@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/smalex-z/gopher/internal/db"
@@ -109,6 +110,16 @@ type LocalServiceStatus struct {
 
 type LocalSetupService struct {
 	hub *LogHub
+
+	// reconcileMu serializes ReconcileServerConfig — see that method's doc
+	// comment. It's called concurrently from tunnel/machine create, update,
+	// delete, bootstrap, and agent-install, all with no other coordination;
+	// without a lock, two overlapping calls' read-DB-then-write-file
+	// sequences can interleave so the loser's write (even if invoked first)
+	// lands last, regressing server.toml to a state that doesn't match
+	// either caller's DB read until some unrelated later event reconciles
+	// again.
+	reconcileMu sync.Mutex
 }
 
 func NewLocalSetupService(hub *LogHub) *LocalSetupService {
