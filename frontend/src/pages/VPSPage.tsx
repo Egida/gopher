@@ -7,6 +7,7 @@ import { machinesApi } from '../api/machines'
 import { tunnelsApi } from '../api/tunnels'
 import StatusBadge from '../components/StatusBadge'
 import { toast } from '../lib/toast'
+import { isHealthyStatus } from '../lib/statusColor'
 
 const GITHUB = 'https://github.com/smalex-z/gopher'
 const LINKEDIN = 'https://www.linkedin.com/in/alexzheng04/'
@@ -78,8 +79,11 @@ export default function ServerPage() {
   const machines = machinesData?.data ?? []
   const tunnels = tunnelsData?.data ?? []
   const bothActive = status?.caddy_active === 'active' && status?.rathole_active === 'active'
-  const connectedMachines = machines.filter(m => m.status === 'active' || m.status === 'connected').length
-  const activeTunnels = tunnels.filter(t => t.status === 'active').length
+  const connectedMachines = machines.filter(m => isHealthyStatus(m.status)).length
+  // Was `t.status === 'active'` only — same undercount bug as DashboardPage
+  // had (excluded healthy 'connected' tunnels), found on a separate page
+  // during the same sweep.
+  const activeTunnels = tunnels.filter(t => isHealthyStatus(t.status)).length
 
   return (
     <div className="space-y-6">

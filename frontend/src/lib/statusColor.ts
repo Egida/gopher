@@ -77,3 +77,24 @@ export function statusBg(status: string): string {
 export function statusHex(status: string): string {
   return HEX[statusBucket(status)]
 }
+
+// Paired bg-*-100/text-*-700 classes for pill-style text badges (as opposed
+// to the solid-color dots above) — same bucket, different shade convention.
+// Found missing its own consumer during a live bug report: NetworkMapPage's
+// "Tunnels in this network" row had a THIRD ad hoc status->color switch (the
+// dot next to it already went through statusBg) that only handled
+// active/idle explicitly, so connected — and offline/config-error, the same
+// gap — fell through to grey.
+const PILL: Record<StatusBucket, string> = {
+  active: 'bg-green-100 text-green-700',
+  connected: 'bg-green-100 text-green-700', // same pill treatment as active — both healthy
+  idle: 'bg-amber-100 text-amber-700',
+  pending: 'bg-yellow-100 text-yellow-700',
+  inactive: 'bg-gray-100 text-gray-500',
+  down: 'bg-red-100 text-red-700',
+  unknown: 'bg-gray-100 text-gray-500',
+}
+
+export function statusPillClasses(status: string): string {
+  return PILL[statusBucket(status)]
+}

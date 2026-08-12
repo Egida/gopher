@@ -4,7 +4,7 @@ import { tunnelsApi } from '../api/tunnels'
 import { localApi } from '../api/local'
 import { vpsApi } from '../api/vps'
 import type { Machine, Tunnel } from '../types'
-import { statusHex, statusBg, isHealthyStatus } from '../lib/statusColor'
+import { statusHex, statusBg, statusPillClasses, statusBucket, isHealthyStatus } from '../lib/statusColor'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Search, ZoomIn, ZoomOut, Maximize2,
@@ -859,24 +859,29 @@ function DetailView({
           <g transform={`translate(${transform.tx} ${transform.ty}) scale(${transform.scale})`}>
             {/* Tunnel lines */}
             {tunnelLines.map(({ tunnel, vpsY, machY }) => {
-              const active = tunnel.status === 'active'
-              const idle = tunnel.status === 'idle'
+              // healthy = isHealthyStatus (active OR connected — up, upstream
+              // silent, normal for speak-first apps like Minecraft/MySQL).
+              // Was `tunnel.status === 'active'` only, so a healthy
+              // 'connected' tunnel's own connector line rendered dashed grey
+              // — visually identical to a dead one.
+              const healthy = isHealthyStatus(tunnel.status)
+              const idle = statusBucket(tunnel.status) === 'idle'
               const isUdp = tunnel.transport === 'udp'
               const cy = (vpsY + machY) / 2
               const label = `:${tunnel.rathole_port}`
               const lw = label.length * 6.2 + 10
-              const lineColor  = (active || idle) ? (isUdp ? '#a855f7' : '#4ade80') : '#d1d5db'
-              const pillFill   = active ? (isUdp ? '#faf5ff' : '#f0fdf4') : idle ? '#fffbeb' : '#f9fafb'
-              const pillStroke = active ? (isUdp ? '#a855f7' : '#4ade80') : idle ? '#f59e0b' : '#d1d5db'
-              const textColor  = active ? (isUdp ? '#7e22ce' : '#16a34a') : idle ? '#b45309' : '#6b7280'
+              const lineColor  = (healthy || idle) ? (isUdp ? '#a855f7' : '#4ade80') : '#d1d5db'
+              const pillFill   = healthy ? (isUdp ? '#faf5ff' : '#f0fdf4') : idle ? '#fffbeb' : '#f9fafb'
+              const pillStroke = healthy ? (isUdp ? '#a855f7' : '#4ade80') : idle ? '#f59e0b' : '#d1d5db'
+              const textColor  = healthy ? (isUdp ? '#7e22ce' : '#16a34a') : idle ? '#b45309' : '#6b7280'
               return (
                 <g key={tunnel.id}>
                   <path
                     d={`M ${VPS_RIGHT} ${vpsY} C ${midX} ${vpsY}, ${midX} ${machY}, ${MACHINE_X} ${machY}`}
                     fill="none"
                     stroke={lineColor}
-                    strokeWidth={(active || idle) ? 2.5 : 1.5}
-                    strokeDasharray={active || idle ? undefined : '5 4'}
+                    strokeWidth={(healthy || idle) ? 2.5 : 1.5}
+                    strokeDasharray={healthy || idle ? undefined : '5 4'}
                     opacity={0.9}
                   />
                   <rect x={midX - lw / 2} y={cy - 9} width={lw} height={17} rx={4}
@@ -1125,11 +1130,9 @@ function TunnelRow({ tunnel, domain }: { tunnel: Tunnel; domain: string }) {
       <span className="text-xs font-mono text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5 shrink-0">
         :{tunnel.local_port}
       </span>
-      <span className={`text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${
-        tunnel.status === 'active' ? 'bg-green-100 text-green-700'
-        : tunnel.status === 'idle' ? 'bg-amber-100 text-amber-700'
-        : 'bg-gray-100 text-gray-500'
-      }`}>{tunnel.status === 'idle' ? 'no service' : tunnel.status}</span>
+      <span className={`text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${statusPillClasses(tunnel.status)}`}>
+        {tunnel.status === 'idle' ? 'no service' : tunnel.status}
+      </span>
       {hasUrl && (
         <a href={`https://${tunnel.subdomain}.${domain}`} target="_blank" rel="noopener noreferrer"
           className="text-indigo-500 hover:text-indigo-700 text-xs font-mono truncate max-w-[180px] shrink-0">
