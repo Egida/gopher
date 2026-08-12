@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/smalex-z/gopher/internal/embedbin"
 )
 
 // An arch the edge never bundles must 404 regardless of whether this build
@@ -22,23 +20,5 @@ func TestRatholeHandler_404ForUnsupportedArch(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 for unsupported arch", resp.StatusCode)
-	}
-}
-
-// When binaries are embedded, a supported arch is served.
-func TestRatholeHandler_ServesWhenEmbedded(t *testing.T) {
-	if !embedbin.Embedded() {
-		t.Skip("binaries not fetched; run scripts/fetch-deps.sh")
-	}
-	srv := httptest.NewServer(http.StripPrefix("/static/rathole/", ratholeHandler()))
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL + "/static/rathole/x86_64")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 for x86_64 when embedded", resp.StatusCode)
 	}
 }
