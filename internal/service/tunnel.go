@@ -489,7 +489,16 @@ func (s *TunnelService) Update(id string, req dto.UpdateTunnelRequest) (*db.Tunn
 		if err := s.local.ReconcileServerConfig(); err != nil {
 			log.Printf("tunnel update: reconcile failed: %v", err)
 		}
-		ApplyTunnelPort(tunnel.RatholePort, tunnel.Transport, tunnel.Private)
+		// Firewall failures used to be silently swallowed (ApplyTunnelPort was
+		// void) — this is specifically the "make this private" security-tightening
+		// action, so a failure here means the port may still be reachable despite
+		// the badge already saying Private. Surface it the same way a config-push
+		// failure is surfaced on create: a visible config-error status, not just
+		// a server log line nobody's watching.
+		if ferr := ApplyTunnelPort(tunnel.RatholePort, tunnel.Transport, tunnel.Private); ferr != nil {
+			tunnel.Status = fmt.Sprintf("config-error: firewall: %v", ferr)
+			_ = db.UpdateTunnel(tunnel)
+		}
 		// The Caddy upstream depends on privacy (private → localhost, public →
 		// bind_ip), and on a bind_ip host the existing block is now stale. The
 		// subdomain itself didn't change, so rewrite it here. No-ops without a

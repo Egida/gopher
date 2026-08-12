@@ -24,7 +24,29 @@ func (s *LocalSetupService) AddMachineSSHTunnel(machine *db.Machine) error {
 // Gopher-managed entries (machine SSH tunnels, service tunnels) are placed
 // ABOVE the custom section. The custom section is user-owned and never
 // overwritten — it is the right place for pre-existing or user-added services.
+//
+// Serialized via reconcileMu: this is called concurrently from tunnel/machine
+// create, update, delete, bootstrap, and agent-install with no other
+// coordination between callers. Each call re-reads the full DB state and
+// rewrites the whole file from scratch, so two overlapping calls can
+// interleave such that the one that started first finishes writing last —
+// with a DB snapshot that's now stale relative to the other call's changes.
+// The lock makes every call fully sequential: whichever call runs last
+// always re-reads current state, so the file on disk converges to the truth
+// no matter how many calls raced to get here.
+//
+// MigrateRatholeNoise needs a WIDER hold on this same lock — see its comment
+// — so the actual work lives in reconcileServerConfigLocked, callable by a
+// caller that already holds reconcileMu, without deadlocking on a second Lock.
 func (s *LocalSetupService) ReconcileServerConfig() error {
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+	return s.reconcileServerConfigLocked()
+}
+
+// reconcileServerConfigLocked is ReconcileServerConfig's body, assuming the
+// caller already holds reconcileMu. Do not call this directly unless you do.
+func (s *LocalSetupService) reconcileServerConfigLocked() error {
 	configPath := paths.RatholeConfig
 	const beginMarker = "# ===== BEGIN CUSTOM CONFIGURATION ====="
 	const endMarker = "# ===== END CUSTOM CONFIGURATION ====="

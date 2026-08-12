@@ -155,10 +155,26 @@ func EnsureRatholeNoiseKeys() (priv, pub string, err error) {
 // mergeClientManagedConfig) once they're reachable again. We do not retry
 // here because retrying inside startup would block the dashboard from
 // coming up.
+//
+// Holds reconcileMu for the ENTIRE function, not just step 3. This is called
+// from an un-awaited goroutine at startup while the HTTP server is already
+// live — the doc above only protects this function's OWN internal ordering.
+// Without holding the lock throughout, an unrelated concurrent caller (a
+// tunnel create, a new bootstrap, anything reachable via the dashboard that's
+// already accepting requests) can call ReconcileServerConfig mid-migration:
+// it would see the noise key already committed by step 1 and flip the server
+// to noise transport immediately, before step 2's push loop has reached every
+// machine — a fleet-wide mass-disconnect for every machine not yet reached,
+// not the bounded "one rathole reconnect cycle" the design above assumes.
+// Holding the lock for the whole migration forces every other caller's
+// ReconcileServerConfig to simply wait until this finishes, so no reconcile
+// can ever observe "key set, fleet not yet pushed."
 func (s *LocalSetupService) MigrateRatholeNoise() error {
 	if devMode {
 		return nil
 	}
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
 
 	settings, err := db.GetSettings()
 	if err != nil {
@@ -254,7 +270,10 @@ func (s *LocalSetupService) MigrateRatholeNoise() error {
 	// reconnects within one rathole retry cycle; any client that didn't
 	// drops offline (and was already failing the push above, so it's
 	// already broken from the operator's perspective).
-	if err := s.ReconcileServerConfig(); err != nil {
+	// reconcileServerConfigLocked, not ReconcileServerConfig: this function
+	// already holds reconcileMu for its whole body (see doc comment above) —
+	// calling the locking wrapper here would deadlock on itself.
+	if err := s.reconcileServerConfigLocked(); err != nil {
 		return fmt.Errorf("reconcile server after noise migration: %w", err)
 	}
 

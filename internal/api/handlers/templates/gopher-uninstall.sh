@@ -149,21 +149,39 @@ fi
 # clears every managed key, current or stale) and, for older installs whose key
 # predates the marker, also match the specific blob from vps_key.pub. Operator
 # keys (no marker) are never touched.
+#
+# Two hardenings here after a QA sweep: this used to run unconditionally, so a
+# failed read of $AK (root reading across an NFS-mounted $REAL_HOME with
+# root_squash, an SELinux/AppArmor denial, a transient I/O error) produced an
+# EMPTY $_tmp — indistinguishable from "genuinely no other keys" — which then
+# got written straight over $AK with no backup, silently deleting every key
+# including the operator's own. If that was their only key, this "safe,
+# best-effort" uninstall locks them out of the box with no recovery path.
 AK="$REAL_HOME/.ssh/authorized_keys"
 if [ -f "$AK" ]; then
-  _tmp=$(mktemp)
-  grep -v ' gopher-managed[[:space:]]*$' "$AK" > "$_tmp" 2>/dev/null || true
-  if [ -f "$VPS_KEY_FILE" ]; then
-    KEY_BLOB=$(awk '{print $2}' "$VPS_KEY_FILE" 2>/dev/null)
-    if [ -n "$KEY_BLOB" ]; then
-      grep -vF "$KEY_BLOB" "$_tmp" > "$_tmp.2" 2>/dev/null && mv "$_tmp.2" "$_tmp" || true
+  if [ ! -r "$AK" ]; then
+    echo "WARN: $AK exists but isn't readable — skipping SSH key cleanup rather than risk wiping it. Remove Gopher's key from it manually if needed."
+  else
+    _tmp=$(mktemp)
+    # Back up before rewriting: this edits the file that controls SSH access
+    # to this box, so if anything below goes wrong there's something to
+    # restore from instead of a silent lockout. Left in place deliberately
+    # (not cleaned up) — a stray backup file is a trivial cost next to that.
+    _ak_backup="$AK.gopher-uninstall.bak"
+    cp "$AK" "$_ak_backup" 2>/dev/null || true
+    grep -v ' gopher-managed[[:space:]]*$' "$AK" > "$_tmp" 2>/dev/null
+    if [ -f "$VPS_KEY_FILE" ]; then
+      KEY_BLOB=$(awk '{print $2}' "$VPS_KEY_FILE" 2>/dev/null)
+      if [ -n "$KEY_BLOB" ]; then
+        grep -vF "$KEY_BLOB" "$_tmp" > "$_tmp.2" 2>/dev/null && mv "$_tmp.2" "$_tmp" || true
+      fi
     fi
+    # cat redirect preserves the file's ownership/permissions (mv under sudo would
+    # chown it to root).
+    cat "$_tmp" > "$AK" 2>/dev/null || mv "$_tmp" "$AK" 2>/dev/null || true
+    rm -f "$_tmp" 2>/dev/null || true
+    echo "Removed Gopher-managed SSH key(s) from authorized_keys (backup: $_ak_backup)"
   fi
-  # cat redirect preserves the file's ownership/permissions (mv under sudo would
-  # chown it to root).
-  cat "$_tmp" > "$AK" 2>/dev/null || mv "$_tmp" "$AK" 2>/dev/null || true
-  rm -f "$_tmp" 2>/dev/null || true
-  echo "Removed Gopher-managed SSH key(s) from authorized_keys"
 fi
 
 echo "Stopping gopher-agent service..."

@@ -182,6 +182,18 @@ export default function MachineHealthPanel({ machine }: Props) {
           {statusQuery.isError && (
             <div className="text-xs text-red-600">Could not reach agent: {(statusQuery.error as Error).message}</div>
           )}
+          {status && machine.status !== 'connected' && (
+            // The agent RPC succeeding while the row header shows Offline/Pending
+            // isn't a contradiction — it means the agent's own back-channel is up
+            // even though the machine's general connectivity (SSH/rathole probe)
+            // isn't. Without this note the two signals read as disagreeing with
+            // each other instead of what they actually are: a useful diagnostic
+            // ("the box is fine, the tunnel is the problem").
+            <div className="flex items-start gap-1.5 text-xs px-2 py-1.5 mb-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
+              <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+              <span>Agent is reachable and reporting live below, but the machine's general connectivity is {machine.status} — likely the SSH/rathole tunnel specifically, not the box itself.</span>
+            </div>
+          )}
           {status && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <Metric icon={<Cpu size={12} />} label="Load (1m / 5m / 15m)">

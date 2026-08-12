@@ -1,9 +1,12 @@
 package service
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/smalex-z/gopher/internal/db"
 )
 
 // stepIndex returns the index of the first step whose joined args contain every
@@ -115,5 +118,55 @@ func TestSSHRateLimitDropSpec(t *testing.T) {
 	other := strings.Join(sshRateLimitDropSpec("2200"), " ")
 	if strings.Contains(other, "gopher_ssh_2222") {
 		t.Error("different ports share a hashlimit bucket name")
+	}
+}
+
+// Regression for a QA-sweep finding: ApplyTunnelPort/RevokeTunnelPort/
+// ApplyDashboardPort/ApplyPublicSSHPort were void — a failed iptables call
+// only ever reached log.Printf, never the caller, never the DB, and with no
+// periodic firewall reconciliation loop anywhere, that failure had no path to
+// visibility or self-healing. recordFirewallFailure is the fix: it must both
+// return a real error (so a caller that checks can react) AND persist a
+// firewall_apply_failed event (so callers that don't check — most of the
+// existing non-fatal call sites — still make the failure visible somewhere
+// an operator will actually look).
+func TestRecordFirewallFailure_ReturnsErrorAndPersistsEvent(t *testing.T) {
+	initTestDB(t)
+
+	cause := errors.New("iptables: no chain/target/match by that name")
+	err := recordFirewallFailure(9443, "tcp", "restrict", cause)
+
+	if err == nil {
+		t.Fatal("expected a non-nil error")
+	}
+	if !strings.Contains(err.Error(), "9443") || !strings.Contains(err.Error(), "restrict") || !errors.Is(err, cause) {
+		t.Errorf("returned error should mention the port/action and wrap the cause, got: %v", err)
+	}
+
+	events, gerr := db.GetRecentEvents(10)
+	if gerr != nil {
+		t.Fatalf("GetRecentEvents: %v", gerr)
+	}
+	var found *db.Event
+	for i := range events {
+		if events[i].Kind == "firewall_apply_failed" {
+			found = &events[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a firewall_apply_failed event to be persisted, got events: %+v", events)
+	}
+	if found.Severity != "error" {
+		t.Errorf("expected severity=error, got %q", found.Severity)
+	}
+	if found.Source != "firewall" {
+		t.Errorf("expected source=firewall, got %q", found.Source)
+	}
+	if found.ResourceID != "9443" {
+		t.Errorf("expected resource_id=9443, got %q", found.ResourceID)
+	}
+	if !strings.Contains(found.Message, "restrict") || !strings.Contains(found.Message, cause.Error()) {
+		t.Errorf("event message should describe the action and cause, got: %q", found.Message)
 	}
 }

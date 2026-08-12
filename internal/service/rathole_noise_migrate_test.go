@@ -6,6 +6,9 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
+
+	"github.com/smalex-z/gopher/internal/paths"
 )
 
 // Regression coverage for the noise-migration bug that broke proxmox-base
@@ -159,5 +162,56 @@ bind_addr = "0.0.0.0:5401"
 	want := []string{"proxmox-base"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// Regression for a QA-sweep finding: MigrateRatholeNoise generates and
+// commits the noise keypair to settings, then pushes updated client.tomls to
+// every machine, and only then reconciles the server — but it used to only
+// hold the lock around that final reconcile. An unrelated concurrent caller
+// (a tunnel create, a new bootstrap — anything the already-live dashboard can
+// trigger during startup) could call ReconcileServerConfig in between: it
+// would see the noise key already committed and flip the server to noise
+// transport before every machine had received its updated config, silently
+// dropping any machine not yet reached. MigrateRatholeNoise must hold
+// reconcileMu for its entire run so a concurrent ReconcileServerConfig simply
+// waits instead of racing ahead on a half-migrated state.
+//
+// This proves the locking invariant directly (holding reconcileMu, as the
+// real migration does for its whole body) rather than standing up a full
+// fake fleet-push scenario for a property that's purely about lock scope.
+func TestReconcileMu_BlocksConcurrentReconcileUntilReleased(t *testing.T) {
+	initTestDB(t)
+	cfgPath := t.TempDir() + "/server.toml"
+	orig := paths.RatholeConfig
+	paths.RatholeConfig = cfgPath
+	t.Cleanup(func() { paths.RatholeConfig = orig })
+
+	svc := &LocalSetupService{}
+
+	// Simulate "migration in progress": hold the same lock MigrateRatholeNoise
+	// holds for its entire body.
+	svc.reconcileMu.Lock()
+
+	done := make(chan error, 1)
+	go func() { done <- svc.ReconcileServerConfig() }()
+
+	select {
+	case <-done:
+		t.Fatal("ReconcileServerConfig returned while the migration's lock was still held — " +
+			"a concurrent caller can observe a half-migrated state")
+	case <-time.After(150 * time.Millisecond):
+		// Expected: it's blocked waiting for the lock.
+	}
+
+	svc.reconcileMu.Unlock()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ReconcileServerConfig after lock release: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReconcileServerConfig never completed after the lock was released")
 	}
 }

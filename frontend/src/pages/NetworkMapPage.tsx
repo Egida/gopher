@@ -4,6 +4,7 @@ import { tunnelsApi } from '../api/tunnels'
 import { localApi } from '../api/local'
 import { vpsApi } from '../api/vps'
 import type { Machine, Tunnel } from '../types'
+import { statusHex, statusBg, isHealthyStatus } from '../lib/statusColor'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Search, ZoomIn, ZoomOut, Maximize2,
@@ -23,13 +24,14 @@ function isPrivateIP(ip: string): boolean {
 }
 
 function isOnlineMachine(m: Machine): boolean {
-  return m.status === 'connected' || m.status === 'active'
+  return isHealthyStatus(m.status)
 }
 
+// Delegates to lib/statusColor — was its own switch that fell through to
+// neutral gray for offline/pending/config-error, so a down tunnel looked
+// the same as one with nothing to report.
 function tunnelStatusDot(status: string): string {
-  if (status === 'active') return 'bg-green-500'
-  if (status === 'idle') return 'bg-amber-500'
-  return 'bg-gray-300'
+  return statusBg(status)
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -595,8 +597,7 @@ function OverviewSVG({
                 {card.machines.map((m, i) => {
                   const ry = top + OV_LAN_HEADER_H + OV_LAN_PAD_Y + i * OV_LAN_MACHINE_ROW_H + OV_LAN_MACHINE_ROW_H / 2
                   const mt = tunnels.filter(t => t.machine_id === m.id)
-                  const dotColor = m.status === 'active' || m.status === 'connected' ? '#22c55e'
-                    : m.status === 'pending' || m.status === 'connecting' ? '#eab308' : '#9ca3af'
+                  const dotColor = statusHex(m.status)
                   const lastSeenSub = isOffline && card.offlineSubGroups
                     ? card.offlineSubGroups.find(g => g.machines.includes(m))?.lastKnownIP
                     : undefined
@@ -632,7 +633,11 @@ function OverviewSVG({
 
 function tunnelAggStatus(card: LanCardData, tunnels: Tunnel[]): 'active' | 'idle' | 'offline' {
   const cardTunnels = tunnels.filter(t => card.machines.some(m => m.id === t.machine_id))
-  if (cardTunnels.some(t => t.status === 'active')) return 'active'
+  // isHealthyStatus also counts 'connected' (up, upstream silent — normal
+  // for speak-first apps like MySQL/Minecraft) as active. Without this, a
+  // LAN whose tunnels are ALL healthy-but-silent fell through both checks
+  // and rendered identically to a LAN with zero working tunnels.
+  if (cardTunnels.some(t => isHealthyStatus(t.status))) return 'active'
   if (cardTunnels.some(t => t.status === 'idle')) return 'idle'
   return 'offline'
 }
@@ -650,11 +655,18 @@ const VPS_HEADER = 70
 const MACH_GAP = 12
 const V_PAD = 32
 
+// Machine boxes on the detail map. machine.status is only ever
+// pending/connected/offline, so this used to treat "offline" as the generic
+// fallback — the same neutral gray as a machine with no data at all, instead
+// of a visually distinct "down" style like StatusBadge gives it everywhere
+// else.
 function statusStyleSVG(status: string) {
   if (status === 'active' || status === 'connected')
     return { fill: '#f0fdf4', stroke: '#16a34a', text: '#14532d', dot: '#22c55e' }
   if (status === 'pending' || status === 'connecting')
     return { fill: '#fefce8', stroke: '#ca8a04', text: '#92400e', dot: '#eab308' }
+  if (status === 'offline' || status === 'failed' || status === 'error')
+    return { fill: '#fef2f2', stroke: '#dc2626', text: '#7f1d1d', dot: '#ef4444' }
   return { fill: '#f9fafb', stroke: '#d1d5db', text: '#6b7280', dot: '#d1d5db' }
 }
 
@@ -942,8 +954,12 @@ function DetailView({
                             fontFamily="ui-monospace,monospace" fontWeight={700}>
                             :{t.rathole_port}
                           </text>
+                          {/* statusHex — was its own ad hoc mapping that treated 'idle'
+                              as healthy-green and lumped 'connected'/'offline'/everything
+                              else into one indigo color, disagreeing with the machine-side
+                              endpoint of this exact same tunnel drawn below. */}
                           <circle cx={VPS_RIGHT} cy={ry} r={4.5}
-                            fill={t.status === 'active' || t.status === 'idle' ? '#22c55e' : '#818cf8'}
+                            fill={statusHex(t.status)}
                             stroke="white" strokeWidth={1.5} />
                           {urlLabel && (
                             <text x={VPS_X + 14} y={cur + ROW_H + 9} fontSize={8.5} fill="#6366f1"
@@ -1029,7 +1045,10 @@ function DetailView({
 
                   {mt.map((t, j) => {
                     const ry = top + MACH_HEADER + j * ROW_H + ROW_H / 2
-                    const tDot = t.status === 'active' ? '#22c55e' : t.status === 'idle' ? '#f59e0b' : '#d1d5db'
+                    // statusHex — must match the VPS-side endpoint of this same
+                    // tunnel (drawn earlier); this used to be a separate ad hoc
+                    // mapping that disagreed with it for 'connected'/'offline'.
+                    const tDot = statusHex(t.status)
                     const name = t.name.length > 13 ? t.name.slice(0, 11) + '…' : t.name
                     return (
                       <g key={`mr-${t.id}`}>
