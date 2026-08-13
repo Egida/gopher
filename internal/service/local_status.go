@@ -120,10 +120,24 @@ type LocalSetupService struct {
 	// either caller's DB read until some unrelated later event reconciles
 	// again.
 	reconcileMu sync.Mutex
+
+	// statusCache memoizes Status() for a short window. /api/local/status is
+	// polled by several dashboard pages (Dashboard 15s, VPS 15s, NetworkMap
+	// 30s, the custom-services banner 60s) and each uncached call runs 2–4
+	// systemctl/pgrep shell-outs. Caching (+ the single-flight in ttlCache)
+	// collapses concurrent polls from every open page/client to one bounded
+	// refresh per window — the payload is system-wide, identical for all
+	// callers, so a couple seconds of staleness is invisible. This is the
+	// second-highest self-DoS surface after the fail2ban endpoints, same
+	// shape as the outage.
+	statusCache *ttlCache[*LocalServiceStatus]
 }
 
 func NewLocalSetupService(hub *LogHub) *LocalSetupService {
-	return &LocalSetupService{hub: hub}
+	return &LocalSetupService{
+		hub:         hub,
+		statusCache: newTTLCache[*LocalServiceStatus](3 * time.Second),
+	}
 }
 
 // SetupWizardState is the public (unauthenticated) subset of Status used by
@@ -157,6 +171,10 @@ func (s *LocalSetupService) SetupState() (*SetupWizardState, error) {
 }
 
 func (s *LocalSetupService) Status() (*LocalServiceStatus, error) {
+	return s.statusCache.get(s.fetchStatus)
+}
+
+func (s *LocalSetupService) fetchStatus() (*LocalServiceStatus, error) {
 	settings, err := db.GetSettings()
 	if err != nil {
 		return nil, err
@@ -968,27 +986,33 @@ func migrateRatholeConfig(existing string) string {
 // given binary path exists. Used for caddy/rathole when gopher supervises them
 // as children — there's no systemd unit to query. pgrep excludes its own PID, so
 // the pattern appearing in pgrep's own argv doesn't self-match.
+// processActive / systemctlStatus are reached from the frontend-polled
+// /api/local/status handler. They MUST be time-bounded: an unbounded
+// `systemctl`/`pgrep` on a wedged systemd/dbus would block the request
+// goroutine, and with several pages polling this endpoint that's the exact
+// self-DoS shape that took the dashboard down. Results are also cached at the
+// Status() level (statusCache) so polls don't re-run these every few seconds.
 func processActive(binPath string) string {
-	if exec.Command("pgrep", "-f", binPath).Run() == nil { // #nosec G204 — fixed path
+	if _, err := runOutputCtx(defaultCmdTimeout, "pgrep", "-f", binPath); err == nil { // #nosec G204 — fixed path
 		return "active"
 	}
 	return "inactive"
 }
 
 func systemctlStatus(service string) string {
-	out, err := exec.Command("systemctl", "is-active", service).Output() // #nosec G204
+	out, err := runOutputCtx(defaultCmdTimeout, "systemctl", "is-active", service) // #nosec G204
 	if err != nil {
-		check, _ := exec.Command("systemctl", "status", service).CombinedOutput() // #nosec G204
-		if strings.Contains(string(check), "could not be found") || strings.Contains(string(check), "not-found") {
+		check, _ := runOutputCtx(defaultCmdTimeout, "systemctl", "status", service) // #nosec G204
+		if strings.Contains(check, "could not be found") || strings.Contains(check, "not-found") {
 			return "not-found"
 		}
-		s := strings.TrimSpace(string(out))
+		s := strings.TrimSpace(out)
 		if s == "" {
 			return "inactive"
 		}
 		return s
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(out)
 }
 
 // detectHostIPs returns all non-loopback unicast IPv4 addresses on the host's

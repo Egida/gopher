@@ -53,6 +53,17 @@ func (c *SSHClient) Close() error {
 	return c.client.Close()
 }
 
+// executeTimeout bounds a single short remote command. ClientConfig.Timeout
+// only covers the TCP dial, NOT session.Run — a live-but-hung origin (or one
+// reachable only through a wedged rathole tunnel) would otherwise block the
+// caller forever. Every Execute caller runs a quick status/probe command, and
+// several are on HTTP request goroutines (machine status, network-info, ssh-key
+// reassign, recover), so an unbounded Run there is a handler-wedge waiting to
+// happen. ExecuteWithOutput is deliberately left unbounded — it streams a
+// long-running client install to the deploy log and legitimately runs for
+// minutes.
+const executeTimeout = 20 * time.Second
+
 func (c *SSHClient) Execute(cmd string) (string, error) {
 	session, err := c.client.NewSession()
 	if err != nil {
@@ -64,11 +75,19 @@ func (c *SSHClient) Execute(cmd string) (string, error) {
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	if err := session.Run(cmd); err != nil {
-		return "", fmt.Errorf("command failed: %w (stderr: %s)", err, stderr.String())
-	}
+	done := make(chan error, 1) // buffered so the goroutine never leaks
+	go func() { done <- session.Run(cmd) }()
 
-	return stdout.String(), nil
+	select {
+	case err := <-done:
+		if err != nil {
+			return "", fmt.Errorf("command failed: %w (stderr: %s)", err, stderr.String())
+		}
+		return stdout.String(), nil
+	case <-time.After(executeTimeout):
+		_ = session.Close() // unblock the pending session.Run
+		return "", fmt.Errorf("ssh command timed out after %s: %s", executeTimeout, cmd)
+	}
 }
 
 func (c *SSHClient) ExecuteWithOutput(cmd string, w io.Writer) error {
