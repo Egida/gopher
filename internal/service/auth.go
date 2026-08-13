@@ -12,6 +12,7 @@ import (
 
 	"github.com/smalex-z/gopher/internal/db"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 const (
@@ -347,13 +348,12 @@ type TOTPDeviceInfo struct {
 	LastUsedAt *time.Time `json:"last_used_at"`
 }
 
-// verifyTOTPAcrossDevices walks every enrolled device and returns the matching
-// device ID on the first hit. Caller is responsible for updating last_used_at.
-func verifyTOTPAcrossDevices(code string) (string, bool) {
-	devices, err := db.GetTOTPDevices()
-	if err != nil {
-		return "", false
-	}
+// verifyTOTPAgainstDevices is the pure core: walk a device slice, return the
+// matching device ID on the first hit. Takes the devices explicitly so it can
+// be called with rows already read via a transaction (inside MutateSettingsTx)
+// OR via the global pool — the caller decides where the read happens, which
+// matters because a global-pool read inside a settings transaction deadlocks.
+func verifyTOTPAgainstDevices(devices []db.TOTPDevice, code string) (string, bool) {
 	for _, d := range devices {
 		if verifyTOTP(d.Secret, code) {
 			return d.ID, true
@@ -362,11 +362,11 @@ func verifyTOTPAcrossDevices(code string) (string, bool) {
 	return "", false
 }
 
-// verifyTOTPOrBackup matches a code against any device first, then backup codes.
-// Returns (deviceID, backupConsumedJSON, ok). If a backup code matched, the caller
-// must persist the updated AppSettings.TOTPBackupCodes JSON.
-func verifyTOTPOrBackup(code, backupCodesJSON string) (deviceID, updatedBackupJSON string, ok bool) {
-	if id, hit := verifyTOTPAcrossDevices(code); hit {
+// verifyCodeOrBackup matches against the supplied devices first, then backup
+// codes. Returns (deviceID, backupConsumedJSON, ok); a matched backup code
+// yields updated JSON the caller must persist.
+func verifyCodeOrBackup(devices []db.TOTPDevice, code, backupCodesJSON string) (deviceID, updatedBackupJSON string, ok bool) {
+	if id, hit := verifyTOTPAgainstDevices(devices, code); hit {
 		return id, backupCodesJSON, true
 	}
 	matched, updated, err := verifyAndConsumeBackupCode(backupCodesJSON, code)
@@ -374,6 +374,26 @@ func verifyTOTPOrBackup(code, backupCodesJSON string) (deviceID, updatedBackupJS
 		return "", backupCodesJSON, false
 	}
 	return "", updated, true
+}
+
+// verifyTOTPAcrossDevices / verifyTOTPOrBackup are the global-pool convenience
+// wrappers, safe to call OUTSIDE any transaction (e.g. LoginTOTP). They MUST
+// NOT be used inside a MutateSettingsTx closure — read devices via
+// db.GetTOTPDevicesTx(tx) there and call the pure helpers above instead.
+func verifyTOTPAcrossDevices(code string) (string, bool) {
+	devices, err := db.GetTOTPDevices()
+	if err != nil {
+		return "", false
+	}
+	return verifyTOTPAgainstDevices(devices, code)
+}
+
+func verifyTOTPOrBackup(code, backupCodesJSON string) (deviceID, updatedBackupJSON string, ok bool) {
+	devices, err := db.GetTOTPDevices()
+	if err != nil {
+		return "", backupCodesJSON, false
+	}
+	return verifyCodeOrBackup(devices, code, backupCodesJSON)
 }
 
 func (s *AuthService) TOTPStatus() (enabled bool, devices []TOTPDeviceInfo, backupCodesRemaining int, err error) {
@@ -447,7 +467,7 @@ func (s *AuthService) TOTPConfirm(code, name, ip string) ([]string, error) {
 	}
 
 	var plain []string
-	if err := db.MutateSettings(func(settings *db.AppSettings) error {
+	if err := db.MutateSettingsTx(func(tx *gorm.DB, settings *db.AppSettings) error {
 		if settings.TOTPSecret == "" {
 			return fmt.Errorf("no enrollment in progress; call enroll first")
 		}
@@ -460,7 +480,9 @@ func (s *AuthService) TOTPConfirm(code, name, ip string) ([]string, error) {
 			Secret:    settings.TOTPSecret,
 			CreatedAt: time.Now(),
 		}
-		if err := db.CreateTOTPDevice(device); err != nil {
+		// Tx-scoped write: db.CreateTOTPDevice (global pool) here was the exact
+		// call that self-deadlocked the server — see MutateSettingsTx.
+		if err := db.CreateTOTPDeviceTx(tx, device); err != nil {
 			return fmt.Errorf("failed to save device: %w", err)
 		}
 
@@ -469,7 +491,7 @@ func (s *AuthService) TOTPConfirm(code, name, ip string) ([]string, error) {
 
 		// Generate backup codes only if this is the first device. Otherwise keep
 		// the existing set; backup codes are shared across devices.
-		count, err := db.CountTOTPDevices()
+		count, err := db.CountTOTPDevicesTx(tx)
 		if err != nil {
 			return err
 		}
@@ -503,15 +525,19 @@ func (s *AuthService) TOTPDisable(code, ip string) error {
 		s.logEvent("TOTP_RATE_LIMITED", ip)
 		return fmt.Errorf("too many attempts")
 	}
-	return db.MutateSettings(func(settings *db.AppSettings) error {
+	return db.MutateSettingsTx(func(tx *gorm.DB, settings *db.AppSettings) error {
 		if !settings.TOTPEnabled {
 			return fmt.Errorf("2FA is not enabled")
 		}
-		_, _, ok := verifyTOTPOrBackup(code, settings.TOTPBackupCodes)
+		devices, err := db.GetTOTPDevicesTx(tx)
+		if err != nil {
+			return err
+		}
+		_, _, ok := verifyCodeOrBackup(devices, code, settings.TOTPBackupCodes)
 		if !ok {
 			return fmt.Errorf("invalid code")
 		}
-		if err := db.DeleteAllTOTPDevices(); err != nil {
+		if err := db.DeleteAllTOTPDevicesTx(tx); err != nil {
 			return fmt.Errorf("failed to delete devices: %w", err)
 		}
 		settings.TOTPEnabled = false
@@ -531,22 +557,26 @@ func (s *AuthService) TOTPRemoveDevice(deviceID, code, ip string) error {
 		s.logEvent("TOTP_RATE_LIMITED", ip)
 		return fmt.Errorf("too many attempts")
 	}
-	return db.MutateSettings(func(settings *db.AppSettings) error {
+	return db.MutateSettingsTx(func(tx *gorm.DB, settings *db.AppSettings) error {
 		if !settings.TOTPEnabled {
 			return fmt.Errorf("2FA is not enabled")
 		}
-		if _, err := db.GetTOTPDevice(deviceID); err != nil {
+		if _, err := db.GetTOTPDeviceTx(tx, deviceID); err != nil {
 			return err
 		}
-		_, updatedBackup, ok := verifyTOTPOrBackup(code, settings.TOTPBackupCodes)
+		devices, err := db.GetTOTPDevicesTx(tx)
+		if err != nil {
+			return err
+		}
+		_, updatedBackup, ok := verifyCodeOrBackup(devices, code, settings.TOTPBackupCodes)
 		if !ok {
 			return fmt.Errorf("invalid code")
 		}
 		settings.TOTPBackupCodes = updatedBackup
-		if err := db.DeleteTOTPDevice(deviceID); err != nil {
+		if err := db.DeleteTOTPDeviceTx(tx, deviceID); err != nil {
 			return fmt.Errorf("failed to delete device: %w", err)
 		}
-		count, err := db.CountTOTPDevices()
+		count, err := db.CountTOTPDevicesTx(tx)
 		if err != nil {
 			return err
 		}
@@ -575,11 +605,15 @@ func (s *AuthService) TOTPRegenerateBackupCodes(code, ip string) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	if err := db.MutateSettings(func(settings *db.AppSettings) error {
+	if err := db.MutateSettingsTx(func(tx *gorm.DB, settings *db.AppSettings) error {
 		if !settings.TOTPEnabled {
 			return fmt.Errorf("2FA is not enabled")
 		}
-		if _, ok := verifyTOTPAcrossDevices(code); !ok {
+		devices, err := db.GetTOTPDevicesTx(tx)
+		if err != nil {
+			return err
+		}
+		if _, ok := verifyTOTPAgainstDevices(devices, code); !ok {
 			return fmt.Errorf("invalid code")
 		}
 		settings.TOTPBackupCodes = codesJSON

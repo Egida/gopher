@@ -680,7 +680,20 @@ func SaveSettings(s *AppSettings) error {
 //
 // fn must not call MutateSettings recursively (deadlock); pass everything
 // it needs in via captured variables.
-func MutateSettings(fn func(*AppSettings) error) error {
+// MutateSettingsTx mutates AppSettings inside a transaction and exposes that
+// transaction to the closure.
+//
+// CRITICAL: the connection pool is capped at ONE connection
+// (SetMaxOpenConns(1), see db.go — the app relies on it for pragma
+// persistence). That means any nested DB call the closure makes MUST go
+// through the passed `tx`, never the global DB pool. A nested global-pool
+// call blocks waiting for the single connection that this very transaction is
+// already holding → permanent self-deadlock that freezes ALL database access,
+// and therefore the entire server. This exact bug froze a production box: the
+// 2FA-confirm path called db.CreateTOTPDevice (global pool) inside a
+// MutateSettings transaction. Use the *Tx db helpers (GetTOTPDevicesTx,
+// CreateTOTPDeviceTx, …) for any read or write inside fn.
+func MutateSettingsTx(fn func(tx *gorm.DB, s *AppSettings) error) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var s AppSettings
 		if err := tx.First(&s, "id = 'singleton'").Error; err != nil {
@@ -691,11 +704,19 @@ func MutateSettings(fn func(*AppSettings) error) error {
 			}
 		}
 		s.ID = "singleton"
-		if err := fn(&s); err != nil {
+		if err := fn(tx, &s); err != nil {
 			return err
 		}
 		return tx.Save(&s).Error
 	})
+}
+
+// MutateSettings mutates AppSettings in a transaction. The closure must make
+// NO nested DB call on the global pool — with SetMaxOpenConns(1) that
+// self-deadlocks (see MutateSettingsTx). If the closure needs a nested read or
+// write, use MutateSettingsTx and route it through the tx.
+func MutateSettings(fn func(*AppSettings) error) error {
+	return MutateSettingsTx(func(_ *gorm.DB, s *AppSettings) error { return fn(s) })
 }
 
 // Firewall Rules Repository
@@ -970,16 +991,45 @@ func PurgeBotSessions() error {
 // ── TOTP Devices ─────────────────────────────────────────────────────────────
 
 func GetTOTPDevices() ([]TOTPDevice, error) {
+	return GetTOTPDevicesTx(DB)
+}
+
+func GetTOTPDevice(id string) (*TOTPDevice, error) {
+	return GetTOTPDeviceTx(DB, id)
+}
+
+func CreateTOTPDevice(d *TOTPDevice) error {
+	return CreateTOTPDeviceTx(DB, d)
+}
+
+func DeleteTOTPDevice(id string) error {
+	return DeleteTOTPDeviceTx(DB, id)
+}
+
+func DeleteAllTOTPDevices() error {
+	return DeleteAllTOTPDevicesTx(DB)
+}
+
+func CountTOTPDevices() (int64, error) {
+	return CountTOTPDevicesTx(DB)
+}
+
+// *Tx variants operate on a caller-supplied *gorm.DB — either the global DB
+// (the plain wrappers above) or an open transaction. Callers inside a
+// MutateSettingsTx closure MUST use these with the tx; see MutateSettingsTx
+// for why a global-pool call there deadlocks.
+
+func GetTOTPDevicesTx(tx *gorm.DB) ([]TOTPDevice, error) {
 	var devices []TOTPDevice
-	if err := DB.Order("created_at ASC").Find(&devices).Error; err != nil {
+	if err := tx.Order("created_at ASC").Find(&devices).Error; err != nil {
 		return nil, err
 	}
 	return devices, nil
 }
 
-func GetTOTPDevice(id string) (*TOTPDevice, error) {
+func GetTOTPDeviceTx(tx *gorm.DB, id string) (*TOTPDevice, error) {
 	var d TOTPDevice
-	if err := DB.First(&d, "id = ?", id).Error; err != nil {
+	if err := tx.First(&d, "id = ?", id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, &apperrors.NotFoundError{Resource: "totp_device", ID: id}
 		}
@@ -988,21 +1038,21 @@ func GetTOTPDevice(id string) (*TOTPDevice, error) {
 	return &d, nil
 }
 
-func CreateTOTPDevice(d *TOTPDevice) error {
-	return DB.Create(d).Error
+func CreateTOTPDeviceTx(tx *gorm.DB, d *TOTPDevice) error {
+	return tx.Create(d).Error
 }
 
-func DeleteTOTPDevice(id string) error {
-	return DB.Delete(&TOTPDevice{}, "id = ?", id).Error
+func DeleteTOTPDeviceTx(tx *gorm.DB, id string) error {
+	return tx.Delete(&TOTPDevice{}, "id = ?", id).Error
 }
 
-func DeleteAllTOTPDevices() error {
-	return DB.Exec("DELETE FROM totp_devices").Error
+func DeleteAllTOTPDevicesTx(tx *gorm.DB) error {
+	return tx.Exec("DELETE FROM totp_devices").Error
 }
 
-func CountTOTPDevices() (int64, error) {
+func CountTOTPDevicesTx(tx *gorm.DB) (int64, error) {
 	var count int64
-	return count, DB.Model(&TOTPDevice{}).Count(&count).Error
+	return count, tx.Model(&TOTPDevice{}).Count(&count).Error
 }
 
 func TouchTOTPDevice(id string) error {
